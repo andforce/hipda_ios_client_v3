@@ -624,12 +624,19 @@
     if (!text) return nil;
     
     // url
-    NSString *urlRegEx =
-    @"((http|https)://)?((\\w)*|([0-9]*)|([-|_])*)+([\\.|/]((\\w)*|([0-9]*)|([-|_])*))+";
-    urlRegEx =  @"((http[s]{0,1}|ftp)://[a-zA-Z0-9\\.\\-]+\\.([a-zA-Z]{2,4})(:\\d+)?(/[a-zA-Z0-9\\.\\-~!@#$%^&*+?:_/=<>]*)?)|(www.[a-zA-Z0-9\\.\\-]+\\.([a-zA-Z]{2,4})(:\\d+)?(/[a-zA-Z0-9\\.\\-~!@#$%^&*+?:_/=<>]*)?)";
+    NSString *urlRegEx = @"((http[s]{0,1}|ftp)://[a-zA-Z0-9\\.\\-]+\\.([a-zA-Z]{2,4})(:\\d+)?(/[a-zA-Z0-9\\.\\-~!@#$%^&*+?:_/=<>]*)?)|(www.[a-zA-Z0-9\\.\\-]+\\.([a-zA-Z]{2,4})(:\\d+)?(/[a-zA-Z0-9\\.\\-~!@#$%^&*+?:_/=<>]*)?)";
     NSString *r = [RX(urlRegEx) replace:text withBlock:^NSString *(NSString *match) {
         return [NSString stringWithFormat:@"[url]%@[/url]", match];
     }];
+    
+    // 不知为啥\u00a0造成文字截断...
+    // White space characters
+    // https://msdn.microsoft.com/en-us/library/t809ektx.aspx
+    // \u00a0 \u2007 \u202f \u1680 \u2000 \u2001 \u2002 \u2003 \u2004
+    // \u2005 \u2006 \u2007 \u2008 \u2009 \u200a \u202f \u205f \u3000
+    // http://stackoverflow.com/questions/7628470/remove-all-whitespaces-from-nsstring
+    NSArray *words = [r componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    r = [words componentsJoinedByString:@" "];
     
     // other
     // ...

@@ -578,7 +578,7 @@ NSLocalizedStringFromTableInBundle((key), nil, [NSBundle bundleWithPath:[[NSBund
                                                                                       action:@selector(gotoNextPage)]];
     
     // Counter Label
-    _counterLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 95, 40)];
+    _counterLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 95, 30)];
     _counterLabel.textAlignment = NSTextAlignmentCenter;
     _counterLabel.backgroundColor = [UIColor clearColor];
     _counterLabel.font = [UIFont fontWithName:@"Helvetica" size:17];
@@ -811,6 +811,23 @@ NSLocalizedStringFromTableInBundle((key), nil, [NSBundle bundleWithPath:[[NSBund
     _performingLayout = NO;
     
     [self.view addGestureRecognizer:_panGesture];
+    
+    // button backgroundColor
+    for (UIView *v in _toolbar.subviews) {
+        if ([v isKindOfClass:NSClassFromString([@"UITool" stringByAppendingString:@"barButton"])]) {
+            for (UIView *vv in v.subviews) {
+                if ([vv isKindOfClass:NSClassFromString([@"_UITool" stringByAppendingString:@"barNavigationButton"])]) {
+                    vv.backgroundColor = [UIColor colorWithWhite:0 alpha:0.6];
+                    vv.layer.cornerRadius = 4;
+                    vv.layer.masksToBounds = YES;
+                }
+            }
+        }
+    }
+    _counterLabel.backgroundColor = [UIColor colorWithWhite:0 alpha:0.6];
+    _counterLabel.layer.cornerRadius = 4;
+    _counterLabel.layer.masksToBounds = YES;
+
 }
 
 #pragma mark - Interface Orientation
@@ -1045,8 +1062,9 @@ NSLocalizedStringFromTableInBundle((key), nil, [NSBundle bundleWithPath:[[NSBund
     page.photo = [self photoAtIndex:index];
     
     __block __weak IDMPhoto *photo = (IDMPhoto*)page.photo;
+    __weak IDMZoomingScrollView *weakPage = page;
     photo.progressUpdateBlock = ^(CGFloat progress){
-        [page setProgress:progress forPhoto:photo];
+        [weakPage setProgress:progress forPhoto:photo];
     };
 }
 
@@ -1176,8 +1194,10 @@ NSLocalizedStringFromTableInBundle((key), nil, [NSBundle bundleWithPath:[[NSBund
     // Counter
 	if ([self numberOfPhotos] > 1) {
 		_counterLabel.text = [NSString stringWithFormat:@"%i %@ %i", _currentPageIndex+1, IDMPhotoBrowserLocalizedStrings(@"of"), [self numberOfPhotos]];
+        _counterLabel.hidden = NO;
 	} else {
 		_counterLabel.text = nil;
+        _counterLabel.hidden = YES;
 	}
     
 	// Buttons
@@ -1340,6 +1360,10 @@ NSLocalizedStringFromTableInBundle((key), nil, [NSBundle bundleWithPath:[[NSBund
                 [self.activityViewController setCompletionHandler:^(NSString *activityType, BOOL completed) {
                     [selfBlock hideControlsAfterDelay];
                     selfBlock.activityViewController = nil;
+                    
+                    if (completed && [activityType hasSuffix:@"SaveToCameraRoll"]) {
+                        [selfBlock showProgressHUDCompleteMessage:@"保存成功"];
+                    }
                 }];
                 
                 dispatch_async(dispatch_get_main_queue(), ^{

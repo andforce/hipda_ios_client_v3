@@ -11,18 +11,28 @@
 
 //helper
 //
-#define IOS7_OR_LATER ([[[UIDevice currentDevice] systemVersion] compare:@"7.0"] != NSOrderedAscending)
-#define IOS8_OR_LATER ([[[UIDevice currentDevice] systemVersion] compare:@"8.0"] != NSOrderedAscending)
-#define IOS9_OR_LATER ([[[UIDevice currentDevice] systemVersion] compare:@"9.0"] != NSOrderedAscending)
-#define IOS9_2_OR_LATER ([[[UIDevice currentDevice] systemVersion] compare:@"9.2"] != NSOrderedAscending)
+#define SYSTEM_VERSION_EQUAL_TO(v)                  ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] == NSOrderedSame)
+#define SYSTEM_VERSION_GREATER_THAN(v)              ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] == NSOrderedDescending)
+#define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v)  ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] != NSOrderedAscending)
+#define SYSTEM_VERSION_LESS_THAN(v)                 ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] == NSOrderedAscending)
+#define SYSTEM_VERSION_LESS_THAN_OR_EQUAL_TO(v)     ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] != NSOrderedDescending)
+
+#define IOS7_OR_LATER (SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"7.0"))
+#define IOS8_OR_LATER (SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"8.0"))
+#define IOS9_OR_LATER (SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"9.0"))
+#define IOS9_2_OR_LATER (SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"9.2"))
+#define IOS10_OR_LATER (SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"10.0"))
+
 #define IS_IPAD ([[UIDevice currentDevice] userInterfaceIdiom] == UIUserInterfaceIdiomPad)
 
 #define NSStandardUserDefaults [NSUserDefaults standardUserDefaults]
 
 #define HP_SCREEN_WIDTH (CGRectGetWidth([[UIScreen mainScreen] bounds]))
+#define HP_SCREEN_HEIGHT (CGRectGetHeight([[UIScreen mainScreen] bounds]))
 #define HP_CONVERT_WIDTH(a) (ceilf((a)*kScreenWidth/320.f))
 #define HP_CONVERT_HEIGHT(a) (ceilf((a)*kScreenHeight/568.f))
 
+#define HP_1PX (1.0f / [UIScreen mainScreen].scale)
 
 // Copy from Tweet4China
 // Created by Jason Hsu
@@ -91,6 +101,7 @@
 #define kHPKeychainService @"HPAccount"
 #define kHPAccountUID @"HPAccountUID"
 #define kHPAccountUserName @"HPAccountUserName"
+#define kHPAskNotificationPermission @"kHPAskNotificationPermission"
 
 /*
 #define kHPLittleTail @"HPLittleTail"
@@ -117,6 +128,9 @@
 
 #define HP_WWW_BASE_URL @"www.hi-pda.com"
 #define HP_CNC_BASE_URL @"cnc.hi-pda.com"
+#define HP_IMG_BASE_URL @"img.hi-pda.com"
+#define HP_CDN_BASE_URL @"7xq2vp.com1.z0.glb.clouddn.com"
+#define HP_CDN_URL_SUFFIX (@"-w600")
 extern NSString *HP_WWW_BASE_IP;
 extern NSString *HP_CNC_BASE_IP;
 
@@ -131,7 +145,6 @@ extern NSString *HP_CNC_BASE_IP;
 #define HPSettingFavForumsTitle @"HPSettingFavForumsTitle"
 
 #define HPSettingShowAvatar @"HPSettingShowAvatar"
-#define HPSettingOrderByDate @"HPSettingOrderByDate"
 #define HPSettingBSForumOrderByDate @"HPSettingBSForumOrderByDate"
 
 #define HPSettingNightMode @"HPSettingNightMode"
@@ -143,9 +156,7 @@ extern NSString *HP_CNC_BASE_IP;
 #define HPSettingTextFont @"HPSettingTextFont"
 #define HPSettingImageWifi @"HPSettingImageWifi"
 #define HPSettingImageWWAN @"HPSettingImageWWAN"
-#define kHPNetworkStatus @"HPNetworkStatus"
 
-#define HPSettingBgFetchThread @"HPSettingBgFetchThread"
 #define HPSettingBgFetchNotice @"HPSettingBgFetchNotice"
 
 #define HPSettingBGLastMinite @"HPSettingBGLastMinite"
@@ -159,19 +170,31 @@ extern NSString *HP_CNC_BASE_IP;
 #define HPSettingStupidBarLeftAction @"HPSettingStupidBarLeftAction"
 #define HPSettingStupidBarCenterAction @"HPSettingStupidBarCenterAction"
 #define HPSettingStupidBarRightAction @"HPSettingStupidBarRightAction"
-#define HPSettingBlockList @"HPSettingBlockList"
+#define HPSettingBlockList @"HPSettingBlockList" //to remove
 #define HPSettingAfterSendShowConfirm @"HPSettingAfterSendShowConfirm"
 #define HPSettingAfterSendJump @"HPSettingAfterSendJump"
 #define HPSettingDataTrackEnable @"HPSettingDataTrackEnable"
 #define HPSettingBugTrackEnable @"HPSettingBugTrackEnable"
 #define HPSettingForceLogin @"HPSettingForceLogin"
+#define HPSettingEnableXHR @"HPSettingEnableXHR"
 #define HPSettingSwipeBack @"HPSettingSwipeBack"
 
 // image
-#define HPSettingImageSizeFilterEnable @"HPSettingImageSizeFilterEnable"
-#define HPSettingImageSizeFilterMinValue @"HPSettingImageSizeFilterMinValue"
-#define HPSettingImageCDNEnable @"HPSettingImageCDNEnable"
-#define HPSettingImageCDNMinValue @"HPSettingImageCDNMinValue"
+#define HPSettingImageAutoLoadEnableWWAN @"HPSettingImageAutoLoadEnableWWAN"
+#define HPSettingImageSizeFilterEnableWWAN @"HPSettingImageSizeFilterEnableWWAN"
+#define HPSettingImageSizeFilterMinValueWWAN @"HPSettingImageSizeFilterMinValueWWAN"
+#define HPSettingImageCDNEnableWWAN @"HPSettingImageCDNEnableWWAN"
+#define HPSettingImageCDNMinValueWWAN @"HPSettingImageCDNMinValueWWAN"
+#define HPOnlineImageCDNEnableWWAN @"imageCDNEnableWWAN"
+#define HPOnlineImageCDNMinValueWWAN @"imageCDNMinValueWWAN"
+
+#define HPSettingImageAutoLoadEnableWifi @"HPSettingImageAutoLoadEnableWifi"
+#define HPSettingImageSizeFilterEnableWifi @"HPSettingImageSizeFilterEnableWifi"
+#define HPSettingImageSizeFilterMinValueWifi @"HPSettingImageSizeFilterMinValueWifi"
+#define HPSettingImageCDNEnableWifi @"HPSettingImageCDNEnableWifi"
+#define HPSettingImageCDNMinValueWifi @"HPSettingImageCDNMinValueWifi"
+#define HPOnlineImageCDNEnableWifi @"imageCDNEnableWifi"
+#define HPOnlineImageCDNMinValueWifi @"imageCDNMinValueWifi"
 
 #define HPDraft @"HPDraft"
 
@@ -190,6 +213,7 @@ extern NSString *HP_CNC_BASE_IP;
 #define kHPUserLoginSuccess @"HPUserLoginSuccess"
 #define kHPUserLoginError @"HPUserLoginError"
 #define kHPThemeDidChanged @"HPThemeDidChanged"
+#define kHPBlockListDidChange @"kHPBlockListDidChange"
 
 
 

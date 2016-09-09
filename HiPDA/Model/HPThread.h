@@ -37,9 +37,13 @@
 
 + (void)loadThreadsWithFid:(NSInteger)fid
                       page:(NSInteger)page
+              filterParams:(NSDictionary *)filterParams
               forceRefresh:(BOOL)forceRefresh
                      block:(void (^)(NSArray *posts, NSError *error))block;
 
+// 临时放出来
++ (NSArray *)extractThreads:(NSString *)string
+                stickthread:(BOOL)stickthread;
 
 - (NSString *)shortDate;
 

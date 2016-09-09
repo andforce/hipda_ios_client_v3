@@ -11,7 +11,8 @@
 #import "HPAccount.h"
 #import "HPCache.h"
 #import "HPMessage.h"
-#import "HPSetting.h"
+#import "HPBlockService.h"
+#import "HPDatabase.h"
 
 #import "HPHttpClient.h"
 #import "TFHpple.h"
@@ -78,40 +79,20 @@
 
 + (void)loadThreadsWithFid:(NSInteger)fid
                       page:(NSInteger)page
+              filterParams:(NSDictionary *)filterParams
               forceRefresh:(BOOL)forceRefresh
                      block:(void (^)(NSArray *posts, NSError *error))block
 {
-    /*
-    BOOL isStop = NO;
-    NSTimeInterval interval = 86400 * 45;
-
-    NSDate *ago = [NSDate dateWithTimeIntervalSince1970:[HPCommon timeIntervalSince1970WithString:@"2014/10/13"]];
-    NSDate *stop = [NSDate dateWithTimeInterval:interval sinceDate:ago];
-    NSDate *today = [NSDate date];
-    if ([stop compare:today] == NSOrderedAscending) {
-        isStop = YES;
-        NSLog(@"STOP today%@ stop%@",today,stop);
-    } else {
-        NSLog(@"NOT STOP today%@ stop%@",today,stop);
-    }
-    if (isStop && block) {
-        NSDictionary *details = [NSDictionary dictionaryWithObject:@"此版本内测结束, 请更新" forKey:NSLocalizedDescriptionKey];
-        block([NSArray array], [NSError errorWithDomain:@"world" code:200 userInfo:details]);
-        return;
-    }
-    */
-    BOOL isOrderByDateline = [Setting boolForKey:HPSettingOrderByDate];
-    if (fid == 6 && [Setting boolForKey:HPSettingBSForumOrderByDate]) {
-        isOrderByDateline = YES;
-        NSLog(@"HPSettingBSForumOrderByDate YES");
-    }
-    
-    NSString *path;
-    if (!isOrderByDateline) {
-        path = [NSString stringWithFormat:@"forum/forumdisplay.php?fid=%ld&page=%ld", fid, page];
-        //path = @"http://localhost/forumdisplay.html";
-    } else {
-        path = [NSString stringWithFormat:@"forum/forumdisplay.php?fid=%ld&orderby=dateline&page=%ld", fid, page];
+    NSString *path = [NSString stringWithFormat:@"forum/forumdisplay.php?fid=%ld&page=%ld", fid, page];
+    BOOL stickthread = NO;
+    for (NSString *k in filterParams) {
+        NSString *v = filterParams[k];
+        if ([v isEqualToString:@"stickthread"]) {
+            stickthread = YES;
+        }
+        else if (v.length) {
+            path = [path stringByAppendingString:[NSString stringWithFormat:@"&%@=%@", k, v]];
+        }
     }
 
     NSLog(@"load thread path : %@ forceRefresh:%@",path,forceRefresh?@"YES":@"NO");
@@ -188,21 +169,21 @@
         
         
         //NSArray *threadsInfo = [HPThread parserHTML:html];
-        NSArray *threadsInfo = [HPThread extractThreads:html];
+        NSArray *threadsInfo = [HPThread extractThreads:html stickthread:stickthread];
         
         NSMutableArray *threads = [NSMutableArray arrayWithCapacity:[threadsInfo count]];
         for (NSDictionary *attributes in threadsInfo) {
             HPThread *thread = [[HPThread alloc] initWithAttributes:attributes];
             thread.fid = fid;
             
-            if ([Setting isBlocked:thread.user.username]) {
+            if ([[HPBlockService shared] isUserInBlockList:thread.user.username]) {
                 NSLog(@"block %@, remove it from thread list", thread.user.username);
             } else {
                 [threads addObject:thread];
             }
         }
         
-        if (threads.count == 0) {
+        if (threads.count == 0 && !stickthread) {
             block([NSArray array], [NSError crawlerErrorWithContext:context]);
             return;
         }
@@ -210,8 +191,11 @@
         // cache
         [[HPCache sharedCache] cacheForum:[NSArray arrayWithArray:threads] fid:fid page:page];
         
+        // update uid database
+        [self.class updateUidDatabase:threads];
+        
         if (block) {
-            block([NSArray arrayWithArray:threads], nil);
+            block([threads copy], nil);
         }
         
     
@@ -221,6 +205,24 @@
         }
     }];
 }
+
++ (void)updateUidDatabase:(NSArray *)threads
+{
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSMutableArray *users = [@[] mutableCopy];
+        for (HPThread *t in threads) {
+            [users addObject:t.user];
+        }
+        
+        [[HPDatabase sharedDb].queue inTransaction:^(FMDatabase *db, BOOL *rollback) {
+            for (HPUser *user in users) {
+                [db executeUpdate:@"insert OR IGNORE into user (username, uid) values (?, ?)",
+                 user.username, @(user.uid)];
+            }
+        }];
+    });
+}
+
 //
 //+ (NSArray *)parserHTML:(NSString *)HTML {
 //    
@@ -311,13 +313,27 @@
 //    return threads;
 //}
 
-+ (NSArray *)extractThreads:(NSString *)string {
++ (NSArray *)extractThreads:(NSString *)string
+                stickthread:(BOOL)stickthread {
     
     //NSLog(@"html : \n%@", string);
     
     string = [string stringByReplacingOccurrencesOfString:@"\r\n" withString:@"\n"];
-    NSRange range = [string rangeOfString:@"normalthread_"];
-    string = [string substringFromIndex:range.location];
+    
+    if (stickthread) {
+        NSRange range1 = [string rangeOfString:@"stickthread_"];
+        NSRange range2 = [string rangeOfString:@"normalthread_"];
+        if (range1.location != NSNotFound && range2.location != NSNotFound) {
+            string = [string substringWithRange:NSMakeRange(range1.location, range2.location-range1.location)];
+        } else {
+            string = @"";
+        }
+    } else {
+        NSRange range = [string rangeOfString:@"normalthread_"];
+        if (range.location != NSNotFound) {
+            string = [string substringFromIndex:range.location];
+        }
+    }
     
     NSError *error;
     NSRegularExpression *regex = [NSRegularExpression

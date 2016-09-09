@@ -100,8 +100,9 @@
     
     if (IOS7_OR_LATER) {
         RETableViewSection *bgFetchSection = [RETableViewSection sectionWithHeaderTitle:@" " footerTitle:nil];
+        @weakify(self);
         RETableViewItem *bgFetchItem = [RETableViewItem itemWithTitle:@"后台应用程序刷新" accessoryType:UITableViewCellAccessoryDisclosureIndicator selectionHandler:^(RETableViewItem *item) {
-            
+            @strongify(self);
             HPBgFetchViewController *vc = [[HPBgFetchViewController alloc] initWithStyle:UITableViewStylePlain];
             [self.navigationController pushViewController:vc animated:YES];
             
@@ -112,10 +113,11 @@
         [bgFetchSection addItem:bgFetchItem];
         [self.manager addSection:bgFetchSection];
     }
-    
+
     self.dataTrackingSection = [self addDataTrackingControls];
     self.aboutSection = [self addAboutControls];
     
+    @weakify(self);
     RETableViewSection *logoutSection = [RETableViewSection sectionWithHeaderTitle:@"  " footerTitle:@" "];
     RETableViewItem *logoutItem = [RETableViewItem itemWithTitle:@"登出" accessoryType:UITableViewCellAccessoryNone selectionHandler:^(RETableViewItem *item) {
         
@@ -123,7 +125,7 @@
                                              message:@"您确定要登出当前账号吗?\n该账号的设置不会丢失"
                                              handler:^(UIAlertView *alertView, NSInteger buttonIndex)
          {
-             
+             @strongify(self);
              if (buttonIndex == [alertView cancelButtonIndex]) {
                  ;
              } else {
@@ -208,17 +210,6 @@
         [Flurry logEvent:@"Setting ToggleShowAvatar" withParameters:@{@"flag":@(item.value)}];
     }];
     
-    
-    // isOrderByDateline
-    //
-    BOOL isOrderByDateline = [Setting boolForKey:HPSettingOrderByDate];
-    REBoolItem *isOrderByDatelineItem = [REBoolItem itemWithTitle:@"按发帖时间排序" value:isOrderByDateline switchValueChangeHandler:^(REBoolItem *item) {
-        NSLog(@"isOrderByDateline Value: %@", item.value ? @"YES" : @"NO");
-        [Setting saveBool:item.value forKey:HPSettingOrderByDate];
-        
-        [Flurry logEvent:@"Setting ToggleOrderByDateline" withParameters:@{@"flag":@(item.value)}];
-    }];
-    
     //
     //
     NSString *postTail = [Setting objectForKey:HPSettingTail];
@@ -243,7 +234,7 @@
     //
     //
     RETableViewItem *setForumItem = [RETableViewItem itemWithTitle:@"板块设定" accessoryType:UITableViewCellAccessoryDisclosureIndicator selectionHandler:^(RETableViewItem *item) {
-        
+        @strongify(self);
         HPSetForumsViewController *setForumsViewController = [[HPSetForumsViewController alloc] initWithStyle:UITableViewStylePlain];
         [self.navigationController pushViewController:setForumsViewController animated:YES];
         [item deselectRowAnimated:YES];
@@ -251,20 +242,10 @@
         [Flurry logEvent:@"Setting EnterSetForum"];
     }];
     
-    // B&S版新帖在前
-    //
-    BOOL isBSForumOrderByDateline = [Setting boolForKey:HPSettingBSForumOrderByDate];
-    REBoolItem *isBSForumOrderByDatelineItem = [REBoolItem itemWithTitle:@"B&S版新帖在前" value:isBSForumOrderByDateline switchValueChangeHandler:^(REBoolItem *item) {
-        NSLog(@"isBSForumOrderByDateline Value: %@", item.value ? @"YES" : @"NO");
-        [Setting saveBool:item.value forKey:HPSettingBSForumOrderByDate];
-        
-        [Flurry logEvent:@"Setting ToggleBSOrderByDateline" withParameters:@{@"flag":@(item.value)}];
-    }];
-    
     //
     //
     RETableViewItem *blockListItem = [RETableViewItem itemWithTitle:@"屏蔽列表" accessoryType:UITableViewCellAccessoryDisclosureIndicator selectionHandler:^(RETableViewItem *item) {
-        
+        @strongify(self);
         [self.navigationController pushViewController:[[HPBlockListViewController alloc] initWithStyle:UITableViewStyleGrouped] animated:YES];
         [item deselectRowAnimated:YES];
         
@@ -353,7 +334,7 @@
     //
     //
     RETableViewItem *setStupidBarItem = [RETableViewItem itemWithTitle:@"StupidBar" accessoryType:UITableViewCellAccessoryDisclosureIndicator selectionHandler:^(RETableViewItem *item) {
-        
+        @strongify(self);
         HPSetStupidBarController *svc = [HPSetStupidBarController new];
         [self.navigationController pushViewController:svc animated:YES];
         [item deselectRowAnimated:YES];
@@ -410,10 +391,8 @@
     
     [section addItem:isNightModeItem];
     [section addItem:isShowAvatarItem];
-    [section addItem:isOrderByDatelineItem];
     [section addItem:postTailText];
     [section addItem:setForumItem];
-    [section addItem:isBSForumOrderByDatelineItem];
     [section addItem:blockListItem];
     [section addItem:isPreferNoticeItem];
     [section addItem:afterSendConfirmItem];
@@ -435,81 +414,17 @@
     RETableViewSection *section = [RETableViewSection sectionWithHeaderTitle:nil];
     
     
-    RETableViewItem *setImageSizeFilterItem = [RETableViewItem itemWithTitle:@"大图预警 & 图片CDN压缩加速" accessoryType:UITableViewCellAccessoryDisclosureIndicator selectionHandler:^(RETableViewItem *item) {
+    RETableViewItem *setImageSizeFilterItem = [RETableViewItem itemWithTitle:@"图片加载设置" accessoryType:UITableViewCellAccessoryDisclosureIndicator selectionHandler:^(RETableViewItem *item) {
         
         HPSetImageSizeFilterViewController *svc = [HPSetImageSizeFilterViewController new];
-        [self.navigationController pushViewController:svc animated:YES];
+        [weakSelf.navigationController pushViewController:svc animated:YES];
         [item deselectRowAnimated:YES];
         
         [Flurry logEvent:@"Setting ImageSizeFilter"];
     }];
     [section addItem:setImageSizeFilterItem];
     
-    HPImageDisplayStyle styleViaWWAN = [Setting integerForKey:HPSettingImageWWAN];
-    HPImageDisplayStyle styleViaWifi = [Setting integerForKey:HPSettingImageWifi];
-    
-    NSArray *options = @[@"显示全部图片", @"仅显示一张图片", @"不显示图片"];
-    
-    RERadioItem *imageStyleWWANItem = [RERadioItem itemWithTitle:@"移动网络" value:[options objectAtIndex:styleViaWWAN] selectionHandler:^(RERadioItem *item) {
         
-        [item deselectRowAnimated:YES];
-        
-        // Present options controller
-        //
-        RETableViewOptionsController *optionsController = [[RETableViewOptionsController alloc] initWithItem:item options:options multipleChoice:NO completionHandler:^(RETableViewItem *vi) {
-            [weakSelf.navigationController popViewControllerAnimated:YES];
-            
-            [item reloadRowWithAnimation:UITableViewRowAnimationNone];
-            
-            HPImageDisplayStyle styleViaWWAN
-                = [options indexOfObjectIdenticalTo:item.value];
-            [Setting saveInteger:styleViaWWAN forKey:HPSettingImageWWAN];
-            
-            [Flurry logEvent:@"Setting SetImageStyleWWAN" withParameters:@{@"option":@(styleViaWWAN)}];
-        }];
-        
-        optionsController.delegate = weakSelf;
-        optionsController.style = section.style;
-        if (weakSelf.tableView.backgroundView == nil) {
-            optionsController.tableView.backgroundColor = weakSelf.tableView.backgroundColor;
-            optionsController.tableView.backgroundView = nil;
-        }
-        
-        [weakSelf.navigationController pushViewController:optionsController animated:YES];
-    }];
-    RERadioItem *imageStyleWifiItem = [RERadioItem itemWithTitle:@"Wi-Fi" value:[options objectAtIndex:styleViaWifi] selectionHandler:^(RERadioItem *item) {
-        
-        [item deselectRowAnimated:YES];
-        
-        // Present options controller
-        //
-        RETableViewOptionsController *optionsController = [[RETableViewOptionsController alloc] initWithItem:item options:options multipleChoice:NO completionHandler:^(RETableViewItem *vi) {
-            [weakSelf.navigationController popViewControllerAnimated:YES];
-            
-            [item reloadRowWithAnimation:UITableViewRowAnimationNone];
-            
-            HPImageDisplayStyle styleViaWifi
-                = [options indexOfObjectIdenticalTo:item.value];
-            //NSLog(@"styleViaWifi %d", styleViaWifi);
-            [Setting saveInteger:styleViaWifi forKey:HPSettingImageWifi];
-            
-            [Flurry logEvent:@"Setting SetImageStyleWifi" withParameters:@{@"option":@(styleViaWifi)}];
-        }];
-        
-        optionsController.delegate = weakSelf;
-        optionsController.style = section.style;
-        if (weakSelf.tableView.backgroundView == nil) {
-            optionsController.tableView.backgroundColor = weakSelf.tableView.backgroundColor;
-            optionsController.tableView.backgroundView = nil;
-        }
-        
-        [weakSelf.navigationController pushViewController:optionsController animated:YES];
-    }];
-    
-    [section addItem:imageStyleWWANItem];
-    [section addItem:imageStyleWifiItem];
-    
-    
     RETableViewItem *cleanItem = [RETableViewItem itemWithTitle:@"清理缓存" accessoryType:UITableViewCellAccessoryDisclosureIndicator selectionHandler:^(RETableViewItem *item) {
         [item deselectRowAnimated:YES];
         
@@ -674,9 +589,20 @@
         [Flurry logEvent:@"Setting ToggleForceLogin" withParameters:@{@"flag":@(item.value)}];
     }];
     
+    // 模拟XHR强力绕过广告
+    //
+    BOOL isEnableXHR = [Setting boolForKey:HPSettingEnableXHR];
+    REBoolItem *isEnableXHRItem = [REBoolItem itemWithTitle:@"强力绕过运营商劫持" value:isEnableXHR switchValueChangeHandler:^(REBoolItem *item) {
+        NSLog(@"isEnableXHRItem Value: %@", item.value ? @"YES" : @"NO");
+        [Setting saveBool:item.value forKey:HPSettingEnableXHR];
+        
+        [Flurry logEvent:@"Setting ToggleEnableXHR" withParameters:@{@"flag":@(item.value)}];
+    }];
+    
     [section addItem:dataTrackingEnableItem];
     [section addItem:bugTrackingEnableItem];
     [section addItem:isForceLoginItem];
+    [section addItem:isEnableXHRItem];
     
     [_manager addSection:section];
     return section;
@@ -690,9 +616,10 @@
     
     // 致谢
     //
+    @weakify(self);
     RETableViewItem *aboutItem = [RETableViewItem itemWithTitle:@"致谢" accessoryType:UITableViewCellAccessoryDisclosureIndicator selectionHandler:^(RETableViewItem *item) {
         [item deselectRowAnimated:YES];
-        
+        @strongify(self);
         UIWebView *webView=[[UIWebView alloc]initWithFrame:self.view.frame];
         webView.delegate = self;
         NSURL *url = [[NSBundle mainBundle] URLForResource:@"acknowledgement" withExtension:@"html"];
@@ -713,7 +640,7 @@
     //
     RETableViewItem *reportItem = [RETableViewItem itemWithTitle:@"联系作者" accessoryType:UITableViewCellAccessoryDisclosureIndicator selectionHandler:^(RETableViewItem *item) {
         [item deselectRowAnimated:YES];
-        
+        @strongify(self);
         // 获得设备信息
         //
         /*!
@@ -748,6 +675,7 @@
     //
     //
     RETableViewItem *replyItem = [RETableViewItem itemWithTitle:@"回帖建议" accessoryType:UITableViewCellAccessoryDisclosureIndicator selectionHandler:^(RETableViewItem *item) {
+        @strongify(self);
         
         HPThread *thread = [HPThread new];
         thread.fid = 2;
@@ -808,12 +736,14 @@
 }
 
 
-- (void)reset:(id)sender {
-    
+- (void)reset:(id)sender
+{
+    @weakify(self);
     [UIAlertView showConfirmationDialogWithTitle:@"重置设置"
                                          message:@"您确定要重置所有设置吗?"
                                          handler:^(UIAlertView *alertView, NSInteger buttonIndex)
      {
+         @strongify(self);
          BOOL confirm = (buttonIndex != [alertView cancelButtonIndex]);
          if (confirm) {
              [Setting loadDefaults];

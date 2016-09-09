@@ -8,6 +8,11 @@
 
 #import "HPDebugCrawlerViewController.h"
 #import <MessageUI/MFMailComposeViewController.h>
+#import "UIAlertView+Blocks.h"
+#import "HPSetting.h"
+#import "HPHttpClient.h"
+#import "HPThread.h"
+#import "NSString+Additions.h"
 
 @interface HPDebugCrawlerViewController ()<MFMailComposeViewControllerDelegate>
 
@@ -15,6 +20,9 @@
 @property (nonatomic, strong) UITextView *textView;
 @property (nonatomic, assign) BOOL isViewSourceCode;
 @property (nonatomic, strong) UIView *actionsView;
+
+// 临时加的
+@property (nonatomic, assign) BOOL flag1; //用户主动打开xhr
 
 @end
 
@@ -86,10 +94,60 @@
                                                            target:self
                                                            action:@selector(viewHTML:)];
     self.navigationItem.rightBarButtonItem = bbi;
+    
+    
+    [self checkKnownIssues];
+    [self debug_requset];
 }
 
-- (void)didReceiveMemoryWarning {
-    [super didReceiveMemoryWarning];
+- (void)checkKnownIssues
+{
+    // xhr
+    if ([self.context.html rangeOfString:@"XMLHttpRequest"].location != NSNotFound
+        && ![Setting boolForKey:HPSettingEnableXHR]) {
+        
+        UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"检测到已知劫持"
+                                                        message:@"是否开启强力绕过模式"
+                                                       delegate:nil
+                                              cancelButtonTitle:@"算了"
+                                              otherButtonTitles:@"好的", nil];
+        @weakify(self);
+        [alert showWithHandler:^(UIAlertView *alertView, NSInteger buttonIndex) {
+            @strongify(self);
+            if (buttonIndex != alertView.cancelButtonIndex) {
+                [Setting saveBool:YES forKey:HPSettingEnableXHR];
+                [self.navigationController popViewControllerAnimated:YES];
+                self.flag1 = YES;
+            }
+        }];
+    }
+}
+
+- (void)debug_requset
+{
+    // 临时打开xhr, 然后发一个请求, 上报结果
+    if (![Setting boolForKey:HPSettingEnableXHR]) {
+        [Setting saveBool:YES forKey:HPSettingEnableXHR];
+        
+        HPCrawlerErrorContext *context = self.context;
+        @weakify(self);
+        [[HPHttpClient sharedClient] getPathContent:self.context.url parameters:nil success:^(AFHTTPRequestOperation *operation, NSString *html) {
+            @strongify(self);
+            NSArray *threadsInfo = [HPThread extractThreads:html stickthread:NO];
+            
+            [Flurry logEvent:@"Test_XHR" withParameters:@{
+                @"url":context.url ?: @"",
+                @"count":@(threadsInfo.count),
+                @"yes": @(threadsInfo.count > 0),
+                @"js": [[@[@(threadsInfo.count)] arrayByAddingObjectsFromArray:[context.html hp_jsLinks]] componentsJoinedByString:@", "]
+            }];
+            
+            if (!self.flag1) [Setting saveBool:NO forKey:HPSettingEnableXHR];
+        } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+            @strongify(self);
+            if (!self.flag1) [Setting saveBool:NO forKey:HPSettingEnableXHR];
+        }];
+    }
 }
 
 - (void)report

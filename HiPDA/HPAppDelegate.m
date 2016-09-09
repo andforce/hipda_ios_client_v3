@@ -92,18 +92,9 @@
     //
     HPHttpClient *client = [HPHttpClient sharedClient];
     [client setReachabilityStatusChangeBlock:^(AFNetworkReachabilityStatus status) {
-        
-        [NSStandardUserDefaults saveInteger:status forKey:kHPNetworkStatus];
-        
-        if (status == AFNetworkReachabilityStatusNotReachable) {
-            NSLog(@"Not reachable");
-        } else {
-            if (status == AFNetworkReachabilityStatusReachableViaWiFi) {
-                NSLog(@"wifi");
-            } else if (status == AFNetworkReachabilityStatusReachableViaWWAN) {
-                NSLog(@"2g3g");
-            }
-        }
+        NSArray *names = @[@"Unknown ", @"NotReachable", @"WWAN", @"Wifi"];
+        NSString *s = [names objectAtIndex:(status+1) % names.count];
+        NSLog(@"ReachabilityStatusChange %@", s);
     }];
     
     
@@ -193,6 +184,10 @@
     NSData *data = [NSKeyedArchiver archivedDataWithRootObject:cookies];
     //NSLog(@"save cookies %@", data);
     [[NSUserDefaults standardUserDefaults] setObject:data forKey:@"kUserDefaultsCookie"];
+    
+    if ([Setting boolForKey:HPSettingBugTrackEnable]) {
+        CLSNSLog(@"-> applicationWillResignActive");
+    }
 }
 
 - (void)applicationDidEnterBackground:(UIApplication *)application
@@ -202,6 +197,10 @@
     
     // reset applicationIconBadgeNumber
     application.applicationIconBadgeNumber  = [[HPAccount sharedHPAccount] badgeNumber];
+    
+    if ([Setting boolForKey:HPSettingBugTrackEnable]) {
+        CLSNSLog(@"-> applicationDidEnterBackground");
+    }
 }
 
 - (void)applicationWillEnterForeground:(UIApplication *)application
@@ -209,6 +208,10 @@
     // Called as part of the transition from the background to the inactive state; here you can undo many of the changes made on entering the background.
     // 省流量
     //[[BFHotPatch shared] check];
+    
+    if ([Setting boolForKey:HPSettingBugTrackEnable]) {
+        CLSNSLog(@"-> applicationWillEnterForeground");
+    }
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application
@@ -217,6 +220,10 @@
 //    [self routeTo:@{@"tid": @"1831924"}];
     [self checkPasteboard];
     // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+    
+    if ([Setting boolForKey:HPSettingBugTrackEnable]) {
+        CLSNSLog(@"-> applicationDidBecomeActive");
+    }
 }
 
 - (void)applicationWillTerminate:(UIApplication *)application
@@ -227,6 +234,27 @@
 - (void)application:(UIApplication *)application didReceiveLocalNotification:(UILocalNotification *)notification
 {
     [self showAlert];
+}
+
+//http://stackoverflow.com/questions/17276898/mpmovieplayerviewcontroller-allow-landscape-mode
+- (UIInterfaceOrientationMask)application:(UIApplication *)application supportedInterfaceOrientationsForWindow:(UIWindow *)window
+{
+    UIViewController *vc = [self hp_topViewController];
+    if (IOS9_2_OR_LATER && [vc isKindOfClass:NSClassFromString(@"SFSafariViewController")])
+    {
+        if (vc.isBeingDismissed)
+        {
+            return UIInterfaceOrientationMaskPortrait;
+        }
+        else
+        {
+            return UIInterfaceOrientationMaskAllButUpsideDown;
+        }
+    }
+    else
+    {
+        return UIInterfaceOrientationMaskPortrait;
+    }
 }
 
 - (void)showAlert {
@@ -313,31 +341,23 @@
 }
 
 - (void)setupBgFetch {
-    BOOL enableBgFetch = IOS7_OR_LATER &&
-    ([Setting boolForKey:HPSettingBgFetchThread] || [Setting boolForKey:HPSettingBgFetchNotice]);
+    BOOL enableBgFetch = [Setting boolForKey:HPSettingBgFetchNotice];
     if (enableBgFetch) {
         
         NSInteger interval = [Setting integerForKey:HPBgFetchInterval];
-        
-        // to remove
-        // v3.4.1 设置了 interval 最大为360, 但真机测试, 当interval > 100时, 基本得不到刷新
-        if (interval > 100) {
-            interval = 100;
-            [Setting saveInteger:interval forKey:HPBgFetchInterval];
-        }
-        
         [[UIApplication sharedApplication] setMinimumBackgroundFetchInterval:interval * 60.f];
         
         NSString *username = [NSStandardUserDefaults stringForKey:kHPAccountUserName or:@""];
-        if (![[HPAccount sharedHPAccount] checkLocalNotificationPermission]
-            && [HPAccount isSetAccount] && ![username isEqualToString:@"wujichao"]) {
+        BOOL haveAsk = [NSStandardUserDefaults boolForKey:kHPAskNotificationPermission or:NO];
+        BOOL haveLogin = [HPAccount isSetAccount] && ![username isEqualToString:@"wujichao"];
+        
+        if (!haveAsk && haveLogin) {
             UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"请求后台伪推送权限" message:@"Hi, 俺利用了iOS7+的后台应用程序刷新来实现新消息的推送，不是很及时，但有总比没有好。\n但是，发送本地推送需要您的授权，若您需要这个功能请点击授权" delegate:nil cancelButtonTitle:@"不" otherButtonTitles:@"授权", nil];
             [alert showWithHandler:^(UIAlertView *alertView, NSInteger buttonIndex) {
                 if (buttonIndex != alertView.cancelButtonIndex) {
                     [[HPAccount sharedHPAccount] askLocalNotificationPermission];
                 } else {
                     [Setting saveBool:NO forKey:HPSettingBgFetchNotice];
-                    [Setting saveBool:NO forKey:HPSettingBgFetchThread];
                 }
             }];
         }
@@ -346,102 +366,32 @@
 
 - (void)application:(UIApplication *)application performFetchWithCompletionHandler:(void (^)(UIBackgroundFetchResult))completionHandler
 {
-    /*
-    UINavigationController *navigationController = (UINavigationController*)self.window.rootViewController;
-    
-    id fetchViewController = navigationController.topViewController;
-    if ([fetchViewController respondsToSelector:@selector(fetchDataResult:)]) {
-        [fetchViewController fetchDataResult:^(NSError *error, NSArray *results){
-            if (!error) {
-                if (results.count != 0) {
-                    //Update UI with results.
-                    //Tell system all done.
-                    completionHandler(UIBackgroundFetchResultNewData);
-                } else {
-                    completionHandler(UIBackgroundFetchResultNoData);
-                }
-            } else {
-                completionHandler(UIBackgroundFetchResultFailed);
-            }
-        }];
-    } else {
-        completionHandler(UIBackgroundFetchResultFailed);
+    if (![Setting boolForKey:HPSettingBgFetchNotice]) {
+        completionHandler(UIBackgroundFetchResultNoData);
+        return;
     }
-    */
-    __block int count = 0;
     
-    UINavigationController *navigationController = (UINavigationController*)self.viewController.frontViewController;
-    id topVC = navigationController.topViewController;
-    //NSLog(@"self.viewController.frontViewPosition %d\nFrontViewPositionLeft %d", self.viewController.frontViewPosition, FrontViewPositionLeft);
-    
-    if ([Setting boolForKey:HPSettingBgFetchThread] &&
-        [topVC isKindOfClass:[HPThreadViewController class]] &&
-        self.viewController.frontViewPosition == FrontViewPositionLeft) {
+    [[HPAccount sharedHPAccount] setNoticeRetrieveBlock:^(UIBackgroundFetchResult result) {
+        // log
+        //
+        NSMutableArray *log = [NSMutableArray arrayWithArray:[NSStandardUserDefaults objectForKey:@"HPBgFetchLog"]];
         
-        HPThreadViewController *tvc = (HPThreadViewController *)topVC;
-        [tvc setBgFetchBlock:^(UIBackgroundFetchResult result) {
-            count++;
-            NSLog(@"count %d bgFetchBlock result %d",count, result);
-            if (count == 2) {
-                NSLog(@"complated!");
-                completionHandler(result);
-            }
-        }];
-        [HPRearViewController threadVCRefresh];
-        
-    } else {
-        count++;
-        if (count == 2) {
-            NSLog(@"pass !");
-            completionHandler(UIBackgroundFetchResultNoData);
+        if (log.count > 233) {
+            [log removeLastObject];
         }
-    }
-    
-    if ([Setting boolForKey:HPSettingBgFetchNotice]) {
-        [[HPAccount sharedHPAccount] setNoticeRetrieveBlock:^(UIBackgroundFetchResult result) {
-            count++;
-            NSLog(@"count %d noticeRetrieveBlock result %d",count, result);
-            if (count == 2) {
-                NSLog(@"complated!");
-                
-                // log
-                //
-                NSMutableArray *log = [NSMutableArray arrayWithArray:[NSStandardUserDefaults objectForKey:@"HPBgFetchLog"]];
-                
-                if (log.count > 233) {
-                    [log removeLastObject];
-                }
-                
-                NSInteger interval = [Setting integerForKey:HPBgFetchInterval];
-                [log insertObject:@{@"interval":@(interval),
-                                 @"date":[NSDate date],
-                                 @"result":@(result)} //0 NewData, 1 NoData, 2 Failed
-                          atIndex:0];
-                [NSStandardUserDefaults saveObject:log forKey:@"HPBgFetchLog"];
-                //NSLog(@"%@", log);
-                //
-                //
-                completionHandler(result);
-            }
-        }];
-        [[HPAccount sharedHPAccount] startCheckWithDelay:0.f];
         
-    } else {
-        count++;
-        if (count == 2) {
-            NSLog(@"pass !");
-            completionHandler(UIBackgroundFetchResultNoData);
-        }
-    }
-
-    /*
-    UILocalNotification *localNotification = [[UILocalNotification alloc] init];
-    localNotification.fireDate = [[NSDate date] dateByAddingTimeInterval:.5];
-    localNotification.alertBody = @"new check";
-    localNotification.repeatInterval = 0;
-    localNotification.soundName = UILocalNotificationDefaultSoundName;
-    [[UIApplication sharedApplication] scheduleLocalNotification:localNotification];
-     */
+        NSInteger interval = [Setting integerForKey:HPBgFetchInterval];
+        [log insertObject:@{@"interval":@(interval),
+                            @"date":[NSDate date],
+                            @"result":@(result)} //0 NewData, 1 NoData, 2 Failed
+                  atIndex:0];
+        [NSStandardUserDefaults saveObject:log forKey:@"HPBgFetchLog"];
+        //NSLog(@"%@", log);
+        //
+        //
+        completionHandler(result);
+    }];
+    [[HPAccount sharedHPAccount] startCheckWithDelay:0.f];
 }
 
 - (void)clean {

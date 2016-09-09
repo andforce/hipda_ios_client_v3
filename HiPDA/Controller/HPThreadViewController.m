@@ -37,6 +37,10 @@
 #import "BBBadgeBarButtonItem.h"
 #import "HPIndecator.h"
 #import "NSString+Additions.h"
+#import "HPNavigationDropdownMenu.h"
+#import "HPThreadFilterMenu.h"
+#import <ReactiveCocoa.h>
+#import "UITableView+ScrollToTop.h"
 
 typedef enum{
 	PullToRefresh = 0,
@@ -59,9 +63,12 @@ typedef enum{
 @property (nonatomic, assign) BOOL loadingMore;
 @property (nonatomic, strong) EGORefreshTableFooterView *loadingMoreView;
 
-@property (nonatomic, strong) NSDate *lastBgFetchDate;
+@property (nonatomic, strong) NSDate *lastEnterBackgroundDate;
 
 @property (nonatomic, assign) NSInteger currentFontSize;
+
+@property (nonatomic, strong) HPNavigationDropdownMenu *dropMenu;
+@property (nonatomic, strong) HPThreadFilterMenu *filterMenu;
 
 @end
 
@@ -113,6 +120,41 @@ typedef enum{
                   forControlEvents:UIControlEventValueChanged];
     self.refreshControl.backgroundColor = [UIColor clearColor];
     
+    HPThreadFilterMenu *filterMenu = [[HPThreadFilterMenu alloc] initWithFrame:CGRectMake(0, 0, self.view.frame.size.width, 230)];//暂时写死高度, 折腾了一下autolayout自动算, 但是要求filterMenu的superview使用autolayout布局filterview
+    HPNavigationDropdownMenu *menuView = [[HPNavigationDropdownMenu alloc] initWithTitle:self.title
+                                                                              customView:filterMenu
+                                                                           containerView:self.view];
+    self.dropMenu = menuView;
+    self.filterMenu = filterMenu;
+    
+    self.navigationItem.titleView = menuView;
+    
+    @weakify(self);
+    [RACObserve(filterMenu, currentFilter) subscribeNext:^(NSDictionary *filter) {
+        @strongify(self);
+        if ([filter[@"filter"] isEqualToString:@""] &&
+            [filter[@"orderby"] isEqualToString:@"lastpost"]) {
+            [self.dropMenu setMenuTitleText:self.title];
+        } else {
+            [self.dropMenu setMenuTitleText:[self.title stringByAppendingString:@"*"]];
+        }
+    }];
+    filterMenu.submitBlock = ^{
+        @strongify(self);
+        [self.dropMenu dismiss];
+        [self refresh:[UIButton new]];
+    };
+    [filterMenu updateWithFid:self.current_fid];
+    
+    // 用户改变了参数, 但是不点击确定就关掉了面板, 就重置页面
+    [RACObserve(menuView, isShown) subscribeNext:^(NSNumber *value) {
+        @strongify(self);
+        if ([value boolValue] == NO) {
+            [self.filterMenu updateWithFid:self.current_fid];
+        }
+    }];
+    
+    
     //
     [self refresh:[UIButton new]];
 }
@@ -121,22 +163,20 @@ typedef enum{
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     
-    /*
-    static BOOL firstTime = YES;
-    if (firstTime) {
-        ;
-    }
-    firstTime = NO;
-     */
+    // dropMenu有bug, 非常偶现, 先dirty fix
+    self.tableView.scrollEnabled = YES;
     
     SWRevealViewController *revealController = [self revealViewController];
     [self.navigationController.view addGestureRecognizer:revealController.panGestureRecognizer];
     
-    [[NSNotificationCenter defaultCenter]
-     addObserver:self
-     selector:@selector(applicationDidBecomeActiveNotification:)
-     name:UIApplicationDidBecomeActiveNotification
-     object:[UIApplication sharedApplication]];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(applicationDidBecomeActiveNotification:)
+                                                 name:UIApplicationDidBecomeActiveNotification
+                                               object:[UIApplication sharedApplication]];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(UIApplicationDidEnterBackgroundNotification:)
+                                                 name:UIApplicationDidEnterBackgroundNotification
+                                               object:[UIApplication sharedApplication]];
     
     if (_currentFontSize &&
         _currentFontSize != [Setting integerForKey:HPSettingFontSizeAdjust]) {
@@ -153,10 +193,13 @@ typedef enum{
      SWRevealViewController *revealController = [self revealViewController];
     [self.navigationController.view removeGestureRecognizer:revealController.panGestureRecognizer];
     
-    [[NSNotificationCenter defaultCenter]
-     removeObserver:self
-     name:UIApplicationDidBecomeActiveNotification
-     object:[UIApplication sharedApplication]];
+    
+    [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                    name:UIApplicationDidBecomeActiveNotification
+                                                  object:[UIApplication sharedApplication]];
+    [[NSNotificationCenter defaultCenter] removeObserver:self
+                                                    name:UIApplicationDidEnterBackgroundNotification
+                                                  object:[UIApplication sharedApplication]];
 }
 
 
@@ -208,27 +251,29 @@ typedef enum{
     [Flurry logEvent:@"ThreadVC LoadForum" withParameters:@{@"fid":@(fid),@"title":title}];
     self.title = title;
     _current_fid = fid;
+    
+    [self.filterMenu updateWithFid:self.current_fid];
     [self refresh:[UIButton new]];
 }
 
 - (void)load:(LoadType)type
      refresh:(BOOL)refresh {
+    
+    [self.dropMenu dismissIfNeeded];
 
     [Flurry logEvent:@"ThreadVC Refresh" withParameters:@{@"type":@(type),@"forceRefresh":@(refresh)}];
+    
+    NSDictionary *filterParams = self.filterMenu.currentFilter;
     
     __weak typeof(self) weakSelf = self;
     [HPThread loadThreadsWithFid:_current_fid
                             page:_current_page
+                    filterParams:filterParams
                     forceRefresh:refresh
                            block:^(NSArray *threads, NSError *error)
      {
-         // 防止无限登陆
-         static int error_count = 0;
-         
          [weakSelf.refreshControl endRefreshing];
          if (!error) {
-             
-             error_count = 0;
             
              if (type != LoadMore) {
                  
@@ -236,13 +281,10 @@ typedef enum{
                  [weakSelf.tableView reloadData];
                  
                  if (type == ClickToRefresh) {
-                     NSIndexPath *indexPath = [NSIndexPath indexPathForRow:0 inSection:0];
-                     [self.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionNone animated:NO];
+                     [self.tableView hp_scrollToTop];
                  }
                  
              } else { // loadMore
-                 
-                 NSUInteger statingIndex = [_threads count];
                  
                  // 去重, O(50^2)
                  NSArray *oldThreads = [NSArray arrayWithArray:_threads];
@@ -257,29 +299,11 @@ typedef enum{
                      }
                      if (!isSame) [_threads addObject:thread];
                  }
-                 /*
-                 NSUInteger endingIndex = [_threads count];
-                 
-                 NSMutableArray *indexPaths = [NSMutableArray arrayWithCapacity:endingIndex - statingIndex];
-                 for (NSUInteger index = statingIndex; index < endingIndex; index++) {
-                     NSIndexPath *indexPath = [NSIndexPath indexPathForRow:index inSection:0];
-                     [indexPaths addObject:indexPath];
-                 }
-                 
-                 [weakSelf.tableView beginUpdates];
-                 [weakSelf.tableView insertRowsAtIndexPaths:indexPaths withRowAnimation:UITableViewRowAnimationBottom];
-                 [weakSelf.tableView endUpdates];
-                  */
-                 // 直接reloadData比insertRows动画效果好
+                
                  [weakSelf.tableView reloadData];
              }
              
              [weakSelf.tableView flashScrollIndicators];
-             if (weakSelf.bgFetchBlock) {
-                 weakSelf.bgFetchBlock(UIBackgroundFetchResultNewData);
-                 weakSelf.bgFetchBlock = nil;
-                 weakSelf.lastBgFetchDate = [NSDate new];
-             }
              
          } else {
              
@@ -288,50 +312,32 @@ typedef enum{
                  if ([HPAccount isSetAccount]) {
                      [SVProgressHUD showWithStatus:@"重新登陆中..."];
                  }
-                 
-                 
-                 error_count++;
-                 if (error_count == 1) {
-                     ;
-                 } else {
-                     if (weakSelf.bgFetchBlock) {
-                         weakSelf.bgFetchBlock(UIBackgroundFetchResultFailed);
-                         weakSelf.bgFetchBlock = nil;
-                     }
-                 }
              } else  if (error.code == HPERROR_NOT_DEFAULT_THREAD_SETTING_CODE) {
                  [UIAlertView showWithTitle:@"加载失败"
                                     message:@"返回结果为空, 可能是由于您设置了每页帖子15条, 而置顶帖超过15个, 前往个人中心修改为默认?"
                                     handler:^(UIAlertView *alertView, NSInteger buttonIndex) {
                                         [[UIApplication sharedApplication] openURL:[NSURL URLWithString:S(@"http://%@/forum/memcp.php?action=profile&typeid=5", HPBaseURL)]];
                                     }];
-                 
-                 if (weakSelf.bgFetchBlock) {
-                     weakSelf.bgFetchBlock(UIBackgroundFetchResultFailed);
-                     weakSelf.bgFetchBlock = nil;
-                 }
              } else if (error.code == HPERROR_CRAWLER_CODE) {
                  HPCrawlerErrorContext *context = error.userInfo[@"context"];
                  [Flurry logEvent:@"Crawler_Error" withParameters:@{@"info":[NSString stringWithFormat:@"url:%@, html:%@", context.url, context.html], @"js": [[context.html hp_jsLinks] componentsJoinedByString:@", "]}];
-                 [UIAlertView showWithTitle:@"加载失败"
-                                    message:@"看看是不是论坛挂了或者是被运营商劫持了"
-                                    handler:^(UIAlertView *alertView, NSInteger buttonIndex) {
-                                        HPDebugCrawlerViewController *dvc = [HPDebugCrawlerViewController new];
-                                        dvc.context = context;
-                                        [self presentViewController:[HPCommon swipeableNVCWithRootVC:dvc] animated:YES completion:nil];
-                                    }];
                  
-                 if (weakSelf.bgFetchBlock) {
-                     weakSelf.bgFetchBlock(UIBackgroundFetchResultFailed);
-                     weakSelf.bgFetchBlock = nil;
-                 }
+                 UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"加载失败"
+                                                                 message:@"看看是不是论坛挂了或者是被运营商劫持了"
+                                                                delegate:nil
+                                                       cancelButtonTitle:@"算了"
+                                                       otherButtonTitles:@"好的", nil];
+                 @weakify(self);
+                 [alert showWithHandler:^(UIAlertView *alertView, NSInteger buttonIndex) {
+                     @strongify(self);
+                     if (buttonIndex != alertView.cancelButtonIndex) {
+                         HPDebugCrawlerViewController *dvc = [HPDebugCrawlerViewController new];
+                         dvc.context = context;
+                         [self presentViewController:[HPCommon swipeableNVCWithRootVC:dvc] animated:YES completion:nil];
+                     }
+                 }];
              } else {
                  [SVProgressHUD showErrorWithStatus:[error localizedDescription]];
-                 
-                 if (weakSelf.bgFetchBlock) {
-                     weakSelf.bgFetchBlock(UIBackgroundFetchResultFailed);
-                     weakSelf.bgFetchBlock = nil;
-                 }
              }
          }
         
@@ -441,7 +447,6 @@ typedef enum{
     // mark read
     HPThreadCell *cell = (HPThreadCell *)[tableView cellForRowAtIndexPath:indexPath];
     [cell markRead];
-    [[HPCache sharedCache] readThread:thread];
     
     HPReadViewController *readVC =
     [[HPReadViewController alloc] initWithThread:thread];
@@ -534,7 +539,7 @@ typedef enum{
 
 - (float)tableViewHeight {
     // return height of table view
-    return [self.tableView contentSize].height;
+    return MAX(CGRectGetHeight(self.tableView.frame) - 64.f, [self.tableView contentSize].height);
 }
 
 - (float)endOfTableView:(UIScrollView *)scrollView {
@@ -638,6 +643,8 @@ typedef enum{
 }
 
 - (void)newThread:(id)sender {
+    [self.dropMenu dismissIfNeeded];
+    
     HPNewThreadViewController *tvc = [[HPNewThreadViewController alloc] initWithFourm:_current_fid delegate:self];
     
     [self presentViewController:[HPCommon swipeableNVCWithRootVC:tvc] animated:YES completion:nil];
@@ -665,48 +672,39 @@ typedef enum{
     [Flurry logEvent:@"ThreadVC AutoLogin" withParameters:@{@"error":@""}];
 }
 
-#pragma mark - 
-- (void)applicationDidBecomeActiveNotification:(NSNotification *)notification {
-    
-    // bgfetch
-    if (_lastBgFetchDate) {
-        
-        NSDate *now = [NSDate new];
-        NSTimeInterval interval = [now timeIntervalSinceDate:_lastBgFetchDate];
-        NSString *tip = nil;
-        if (interval < 60) {
-            tip = S(@"已在%ds前更新", (int)interval);
-        } else {
-            tip = S(@"已于%d分钟前更新", (int)(interval/60));
-        }
-        [ZAActivityBar showSuccessWithStatus:tip];
-        //[SVProgressHUD showSuccessWithStatus:S(@"now : %@\nlast : %@\ninterval : %d", now, _lastBgFetchDate, (int)ceil(interval/60.f))];
-        
-        _lastBgFetchDate = nil;
+#pragma mark - 自动刷新
+- (void)UIApplicationDidEnterBackgroundNotification:(NSNotification *)notification
+{
+    self.lastEnterBackgroundDate = [NSDate new];
+}
+
+- (void)applicationDidBecomeActiveNotification:(NSNotification *)notification
+{
+    if (!self.lastEnterBackgroundDate) {
+        return;
     }
+    
+    // 离开超过10分钟, 回来时自动刷新
+    NSTimeInterval interval = [[NSDate new] timeIntervalSinceDate:self.lastEnterBackgroundDate];
+    if (interval > 10 * 60) {
+        [self refresh:[UIButton new]];
+    }
+    
+    self.lastEnterBackgroundDate = nil;
 }
-
-#pragma mark - test
-// test
-- (void)logout:(id)sender {
-    NSLog(@"logout");
-    [[HPAccount sharedHPAccount] logout];
-}
-
 
 #pragma mark - theme
 - (void)themeDidChanged {
     [self setActionButton];
     [self.tableView reloadData];
     [self.tableView setBackgroundColor:[HPTheme backgroundColor]];
+    [self.dropMenu setMenuTitleColor:[HPTheme textColor]];
 }
 
 #pragma mark - 
 - (void)didClickAvatar:(HPUser *)user {
     HPUserViewController *uvc = [HPUserViewController new];
-    
-    NSStringEncoding gbkEncoding = CFStringConvertEncodingToNSStringEncoding(kCFStringEncodingGB_18030_2000);
-    uvc.username = [user.username stringByAddingPercentEscapesUsingEncoding:gbkEncoding];
+    uvc.username = user.username;
     
     [self.navigationController pushViewController:uvc animated:YES];
 }

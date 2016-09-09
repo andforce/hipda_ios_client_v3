@@ -4,7 +4,8 @@
 	<title>HiPDA</title>
 	<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
 	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-	<style type="text/css">
+	**[debug_script]**
+    <style type="text/css">
 	body {
 		font-family: "STHeitiSC-Light","Helvetica Neue",sans-serif  !Important;
 		-webkit-text-size-adjust: **[txtadjust]**;
@@ -74,15 +75,23 @@
     	border: 1px solid #DDD;
     	display: block !important;
     }
-    
+
     .attach_image {
-        min-height: 20px;
+        min-height: **[min-height]**px;
+    }
+
+    .attach_image_free {
+        min-height: 0px;
+    }
+
+    .attach_small_image {
+        width: auto !important;
     }
     
     .img_placeholder {
         width: 100%;
-        height: 185px;
-        line-height:185px;
+        height: **[min-height]**px;
+        line-height:**[min-height]**px;
         text-align:center;
         background: #f6f6f6;
         font-size: 0.8em;
@@ -102,11 +111,13 @@
     	font-size: 0.9em;
     }
     
-    .content img[src^='http://www.hi-pda.com/forum/attachments/day_140621/1406211752793e731a4fec8f7b.png'],
     .content img[src^='images'],
     .content img[src^='http://www.hi-pda.com/forum/images'],
+    .content img[src^='http://cnc.hi-pda.com/forum/images'],
+    .content img[src^='http://img.hi-pda.com/forum/images'],
+    .content img[src^='http://www.hi-pda.com/forum/attachments/day_140621/1406211752793e731a4fec8f7b.png'],
     .content img[src^='http://cnc.hi-pda.com/forum/attachments/day_140621/1406211752793e731a4fec8f7b.png'],
-    .content img[src^='http://cnc.hi-pda.com/forum/images'] {
+    .content img[src^='http://img.hi-pda.com/forum/attachments/day_140621/1406211752793e731a4fec8f7b.png'] {
     	border: 0 !important;
     	outline: 0 !important;
     	margin: 0 !important;
@@ -185,11 +196,40 @@
         text-align: center;
         color: #929292;
     }
+
+    /********** dark **********/
+    .dark {
+        color: #9c9c9c;
+        background-color:#0a0b0e;
+    }
+    .dark .author {
+        color: #5e5e5e;
+    }
+    .dark .img_placeholder {
+        background: #2b2b2b;
+        color: #9c9c9c;
+    }
+    .dark .gotoFloor {
+        background-color: DimGray;
+    }
+    .dark .floor {
+        color: #5e5e5e;
+    }
+    .dark .time-ago {
+        color: #5e5e5e;
+    }
+    .dark .author {
+        color: #5e5e5e;
+    }
+    .dark .blocked {
+        color: #3A3A3A;
+    }
+    /********** dark **********/
 }
 
 </style>
 </head>
-<body>
+<body class="**[style]**">
 <div class="bd">
 
 <ul class="list" id="list">
@@ -249,6 +289,8 @@ window.addEventListener('load', function() {
     FastClick.attach(document.body);
 }, false);
 
+
+var screen = {width: **[screen_width]**, height: **[screen_height]**};
 
 
 function addNewStyle(newStyle) {
@@ -312,6 +354,7 @@ var img_click = function (el) {
     var div = document.createElement('div');
     div.innerHTML = s;
     var imageNode = div.firstChild;
+    warpImageNode(imageNode);
     el.parentNode.insertBefore(imageNode, el);
     el.parentNode.removeChild(el);
 };
@@ -341,12 +384,25 @@ function getPosition(element) {
 
 var images = document.getElementsByTagName('IMG');
 for (var i in images) {
-    if (images[i].src.indexOf("http://www.hi-pda.com/forum/uc_server/data/avatar/") === 0) {
+    var image = images[i];
+    if (image && image.src && image.src.indexOf("hi-pda.com/forum/uc_server/data/avatar/") === 0) {
         continue;
     }
-    images[i].onerror = function() {
+    warpImageNode(image);
+}
+
+function warpImageNode(image) {
+    image.onerror = function() {
         this.onerror = null;
         this.src = this.src;
+    }
+    image.onload = function() {
+        if (this.src && this.className.indexOf('attach_image') !== -1) {
+            this.className += " attach_image_free";
+        }
+        if (this.naturalWidth < screen.width * 0.3) {
+            this.className += " attach_small_image";
+        }
     }
 }
 

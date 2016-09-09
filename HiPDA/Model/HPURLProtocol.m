@@ -16,6 +16,8 @@
 NSString *HP_WWW_BASE_IP;
 NSString *HP_CNC_BASE_IP;
 
+//#define NSLog(...) do { } while (0)
+
 static NSString *const HPHTTPURLProtocolHandledKey = @"HPHTTPURLProtocolHandledKey";
 
 @interface HPURLMappingProvider : NSObject <HPURLMapping>
@@ -278,7 +280,7 @@ static id<HPURLMapping> s_URLMapping;
     // 1. 如果是SDWebImage的请求, request.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData, SDWebImage自己会处理缓存
     // 2. 这里是通过url后缀来判断是不是图片的, 还可以从response.MIMEType
     if (request.cachePolicy != NSURLRequestReloadIgnoringLocalCacheData
-        && [[[request.URL absoluteString] lowercaseString] hasSuffixes:@[@".jpg", @".jpeg", @".gif", @".png"]]) {
+        && [[[request.URL absoluteString] lowercaseString] hasSuffixes:@[@".jpg", @".jpeg", @".gif", @".png", HP_CDN_URL_SUFFIX]]) {
         
         return YES;
     }

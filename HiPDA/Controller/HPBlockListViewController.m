@@ -7,24 +7,178 @@
 //
 
 #import "HPBlockListViewController.h"
-#import "HPSetting.h"
+#import "HPBlockService.h"
+#import <SVProgressHUD.h>
+#import "UIAlertView+Blocks.h"
+#import "NSError+BlockService.h"
 
-@interface HPBlockListViewController ()
+@interface NSString (BlockList)
+- (NSArray *)hp_toList;
+@end
+@implementation NSString (BlockList)
+// 空格, 逗号作为分界符号
+- (NSArray *)hp_toList;
+{
+    NSString *text = self;
+    text = [text stringByReplacingOccurrencesOfString:@"," withString:@" "];
+    text = [text stringByReplacingOccurrencesOfString:@"，" withString:@" "];
 
-@property (nonatomic, strong)NSArray *list;
+    NSArray *list = [text componentsSeparatedByString:@" "];
+    
+    NSMutableArray *result = [@[] mutableCopy];
+    for (NSString *s in list) {
+        if (s.length) {
+            [result addObject:s];
+        }
+    }
+    return [result copy];
+}
+@end
+
+@protocol HPBlockListHeaderViewDelegate <NSObject>
+
+@required
+- (void)didTapSyncButton:(UIButton *)button;
+- (void)didTapExportButton:(UIButton *)button;
+- (void)didTapImportButton:(UIButton *)button;
+- (void)didTapScriptButton:(UIButton *)button;
+
+@end
+
+@interface HPBlockListHeaderView : UITableViewHeaderFooterView
+
+@property (nonatomic, strong) UIButton *syncButton;
+@property (nonatomic, strong) UIButton *exportButton;
+@property (nonatomic, strong) UIButton *importButton;
+@property (nonatomic, strong) UIButton *scriptButton;
+
+@property (nonatomic, weak) id<HPBlockListHeaderViewDelegate> delegate;
+
+@end
+
+@implementation HPBlockListHeaderView
+- (instancetype)initWithFrame:(CGRect)frame delegate:(id <HPBlockListHeaderViewDelegate>)delegate
+{
+    self = [super initWithFrame:frame];
+    if (self) {
+        
+        _delegate = delegate;
+        
+        _syncButton = ({
+            UIButton *button = [UIButton new];
+            button.layer.cornerRadius = 5;
+            button.layer.borderWidth = 1;
+            button.layer.borderColor = [UIColor blackColor].CGColor;
+            [button setTitle:@"立即同步" forState:UIControlStateNormal];
+            [button setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
+            button.titleLabel.font = [UIFont systemFontOfSize:15];
+            [button addTarget:self.delegate action:@selector(didTapSyncButton:) forControlEvents:UIControlEventTouchUpInside];
+            button;
+        });
+        
+        _exportButton = ({
+            UIButton *button = [UIButton new];
+            button.layer.cornerRadius = 5;
+            button.layer.borderWidth = 1;
+            button.layer.borderColor = [UIColor blackColor].CGColor;
+            [button setTitle:@"导出" forState:UIControlStateNormal];
+            [button setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
+            button.titleLabel.font = [UIFont systemFontOfSize:15];
+            [button addTarget:self.delegate action:@selector(didTapExportButton:) forControlEvents:UIControlEventTouchUpInside];
+            button;
+        });
+        
+        _importButton = ({
+            UIButton *button = [UIButton new];
+            button.layer.cornerRadius = 5;
+            button.layer.borderWidth = 1;
+            button.layer.borderColor = [UIColor blackColor].CGColor;
+            [button setTitle:@"导入" forState:UIControlStateNormal];
+            [button setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
+            button.titleLabel.font = [UIFont systemFontOfSize:15];
+            [button addTarget:self.delegate action:@selector(didTapImportButton:) forControlEvents:UIControlEventTouchUpInside];
+            button;
+        });
+        
+        _scriptButton = ({
+            UIButton *button = [UIButton new];
+            button.layer.cornerRadius = 5;
+            button.layer.borderWidth = 1;
+            button.layer.borderColor = [UIColor blackColor].CGColor;
+            [button setTitle:@"Chrome脚本" forState:UIControlStateNormal];
+            [button setTitleColor:[UIColor blackColor] forState:UIControlStateNormal];
+            button.titleLabel.font = [UIFont systemFontOfSize:15];
+            [button addTarget:self.delegate action:@selector(didTapScriptButton:) forControlEvents:UIControlEventTouchUpInside];
+            button;
+        });
+        
+        if (IOS8_OR_LATER) {
+            [self addSubview:_syncButton];
+            [self addSubview:_exportButton];
+            [self addSubview:_importButton];
+            [self addSubview:_scriptButton];
+            [_syncButton mas_makeConstraints:^(MASConstraintMaker *make) {
+                make.left.equalTo(self).offset(15.f);
+                make.top.equalTo(self).offset(15.f);
+            }];
+            [_scriptButton mas_makeConstraints:^(MASConstraintMaker *make) {
+                make.left.equalTo(_syncButton.mas_right).offset(15.f);
+                make.centerY.equalTo(_syncButton);
+                make.right.equalTo(self).offset(-15);
+                make.width.equalTo(_syncButton);
+            }];
+            [_exportButton mas_makeConstraints:^(MASConstraintMaker *make) {
+                make.left.equalTo(self).offset(15.f);
+                make.top.equalTo(_syncButton.mas_bottom).offset(10.f);
+            }];
+            [_importButton mas_makeConstraints:^(MASConstraintMaker *make) {
+                make.left.equalTo(_exportButton.mas_right).offset(15.f);
+                make.centerY.equalTo(_exportButton);
+                make.right.equalTo(self).offset(-15);
+                make.width.equalTo(_exportButton);
+            }];
+        } else {
+            [self addSubview:_exportButton];
+            [self addSubview:_importButton];
+            [_exportButton mas_makeConstraints:^(MASConstraintMaker *make) {
+                make.left.equalTo(self).offset(15.f);
+                make.centerY.equalTo(self);
+            }];
+            [_importButton mas_makeConstraints:^(MASConstraintMaker *make) {
+                make.left.equalTo(_exportButton.mas_right).offset(15.f);
+                make.centerY.equalTo(self);
+                make.right.equalTo(self).offset(-15);
+                make.width.equalTo(_exportButton);
+            }];
+        }
+    }
+    return self;
+}
+@end
+
+@interface HPBlockListViewController ()<HPBlockListHeaderViewDelegate>
 
 @end
 
 @implementation HPBlockListViewController
 
+- (void)dealloc
+{
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
 - (id)initWithStyle:(UITableViewStyle)style
 {
     self = [super initWithStyle:style];
     if (self) {
-        // Custom initialization
-        _list = [Setting objectForKey:HPSettingBlockList];
+        
     }
     return self;
+}
+
+- (NSArray *)list
+{
+    return [[HPBlockService shared] blockList];
 }
 
 - (void)viewDidLoad
@@ -34,11 +188,25 @@
     
     [self.tableView registerClass:[UITableViewCell class] forCellReuseIdentifier:@"HPBlockListCell"];
     
+    HPBlockListHeaderView *headerView = [[HPBlockListHeaderView alloc] initWithFrame:CGRectMake(0, 0, 0, IOS8_OR_LATER?100:60)
+                                                                            delegate:self];
+    self.tableView.tableHeaderView = headerView;
+    
     self.navigationItem.rightBarButtonItem = self.editButtonItem;
     
-    if (_list.count <= 0) {
-        [[[UIAlertView alloc] initWithTitle:@"您没有屏蔽过任何人" message:@"您可在查看某个用户资料时屏蔽该用户" delegate:nil cancelButtonTitle:nil otherButtonTitles:@"知道了", nil] show];
-    }
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(blockListDidChange:) name:kHPBlockListDidChange object:nil];
+    
+    [[HPBlockService shared] updateWithBlock:^(NSError *error) {
+        //已经通过通知监听然后刷新tableview了
+        if (error) {
+            UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"同步失败"
+                                                            message:error.hp_localizedDescription
+                                                           delegate:nil
+                                                  cancelButtonTitle:@"好吧"
+                                                  otherButtonTitles:nil];
+            [alert show];
+        }
+    }];
 }
 
 - (void)didReceiveMemoryWarning
@@ -56,14 +224,14 @@
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
-    return _list.count;
+    return self.list.count;
 }
 
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"HPBlockListCell" forIndexPath:indexPath];
-    cell.textLabel.text = [_list objectAtIndex:indexPath.row];
+    cell.textLabel.text = [self.list objectAtIndex:indexPath.row];
     cell.selectionStyle = UITableViewCellSelectionStyleNone;
     return cell;
 }
@@ -77,12 +245,72 @@
 - (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath
 {
     if (editingStyle == UITableViewCellEditingStyleDelete) {
-        
-        [Setting removeBlockWithUsername:[_list objectAtIndex:indexPath.row]];
-        _list = [Setting objectForKey:HPSettingBlockList];
-        
+        [[HPBlockService shared] removeUser:[self.list objectAtIndex:indexPath.row]];
         [tableView deleteRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationFade];
     }
 }
 
+- (void)blockListDidChange:(NSNotification *)note
+{
+    [self.tableView reloadData];
+}
+
+#pragma mark - actions
+- (void)didTapSyncButton:(UIButton *)button
+{
+    [SVProgressHUD showWithStatus:@"同步中..."];
+    [[HPBlockService shared] updateWithBlock:^(NSError *error) {
+        if (!error) {
+            [SVProgressHUD showSuccessWithStatus:@"同步成功"];
+        } else {
+            [SVProgressHUD dismiss];
+            UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"同步失败"
+                                                            message:error.hp_localizedDescription
+                                                           delegate:nil
+                                                  cancelButtonTitle:@"好吧"
+                                                  otherButtonTitles:nil];
+            [alert show];
+        }
+    }];
+}
+
+- (void)didTapExportButton:(UIButton *)button
+{
+    NSString *text = [[[HPBlockService shared] blockList] componentsJoinedByString:@","];
+    UIPasteboard *pasteBoard = [UIPasteboard generalPasteboard];
+    [pasteBoard setString:text];
+    [SVProgressHUD showSuccessWithStatus:@"已复制到剪贴板"];
+}
+
+- (void)didTapImportButton:(UIButton *)button
+{
+    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"导入黑名单"
+                                                    message:@"请用逗号分隔"
+                                                   delegate:nil
+                                          cancelButtonTitle:@"取消"
+                                          otherButtonTitles:@"确定", nil];
+    [alert setAlertViewStyle:UIAlertViewStylePlainTextInput];
+    [alert showWithHandler:^(UIAlertView *alertView, NSInteger buttonIndex) {
+        if (buttonIndex != [alertView cancelButtonIndex]) {
+            UITextField *content = [alertView textFieldAtIndex:0];
+            NSString *text = content.text;
+            
+            NSArray *list = [text hp_toList];
+            [[HPBlockService shared] addUsers:list];
+            [self.tableView reloadData];
+        }
+    }];
+}
+
+- (void)didTapScriptButton:(UIButton *)button
+{
+    UIPasteboard *pasteBoard = [UIPasteboard generalPasteboard];
+    [pasteBoard setString:@"https://raw.githubusercontent.com/wujichao/hipda_ios_client_v3/developer-jichao/userscript/hp-black-list.user.js"];
+    UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"复制成功"
+                                                    message:@"Chrome脚本安装地址已经复制到粘贴板, 使用Chrome打开该地址即可安装, 黑名单与iOS客户端同步"
+                                                   delegate:nil
+                                          cancelButtonTitle:@"好的"
+                                          otherButtonTitles:nil];
+    [alert show];
+}
 @end

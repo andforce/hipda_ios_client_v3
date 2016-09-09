@@ -20,6 +20,9 @@
 
 #import "HPHttpClient.h"
 #import <AFHTTPRequestOperation.h>
+#import <SDWebImage/SDWebImageManager.h>
+#import "SDImageCache+URLCache.h"
+#import "NSString+CDN.h"
 
 #define debugParameters 0
 #define debugContent 0
@@ -313,25 +316,23 @@
     
     
     // get avator & floor
-    [[HPDatabase sharedDb] open];
-    
-    [postsArray enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
-        
-        HPNewPost *post = (HPNewPost *)obj;
-        
-        post.floor = idx+1;
-        
-        NSInteger uid = [[[HPDatabase sharedDb] db] intForQuery:@"SELECT uid FROM user WHERE username = ?", post.user.username];
-        post.user.uid = uid;
-        post.user.avatarImageURL = [HPUser avatarStringWithUid:uid];
-        
-        
-        // process content
-        [post processContentHTML];
-    
+    [[HPDatabase sharedDb].queue inDatabase:^(FMDatabase *db) {
+        [postsArray enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
+            
+            HPNewPost *post = (HPNewPost *)obj;
+            
+            post.floor = idx+1;
+            
+            NSInteger uid = [db intForQuery:@"SELECT uid FROM user WHERE username = ?", post.user.username];
+            post.user.uid = uid;
+            post.user.avatarImageURL = [HPUser avatarStringWithUid:uid];
+            
+            
+            // process content
+            [post processContentHTML];
+            
+        }];
     }];
-    
-    [[HPDatabase sharedDb] close];
     
     // fix
     HPNewPost *last = [postsArray lastObject];
@@ -394,12 +395,12 @@
         // 理想的数据结构应该是 {title:xxx, postInfo:{...} content:[html, imageInfo, html, text, imageInfo, videoInfo, otherType...]}
         
         // 帖子内部 image
-        _body_html = [RX(@"<img src=\"images/common/none\\.gif\" file=\"(.*?)\".*?aimg_(\\d+).*?/>") replace:_body_html withDetailsBlock:^NSString *(RxMatch *match) {
+        _body_html = [RX(@"<img src=\"[^\"]*images/common/none\\.gif\" file=\"(.*?)\".*?aimg_(\\d+).*?/>") replace:_body_html withDetailsBlock:^NSString *(RxMatch *match) {
             
             RxMatchGroup *m1 = [match.groups objectAtIndex:1];
             RxMatchGroup *m2 = [match.groups objectAtIndex:2];
-            //NSLog(@"%@", m1.value);
-            NSString *src = [NSString stringWithFormat:@"http://%@/forum/%@", HPBaseURL, m1.value];
+            NSString *src = m1.value;
+            
             // 正则提取是倒序
             [imgsArray insertObject:src atIndex:0];
             NSString *aid = m2.value;
@@ -412,13 +413,13 @@
 //=============================================
         
         // 帖子底部 image
-        _body_html = [RX(@"<br /><br /><img src=\"images/attachicons.*?aid=(\\d+).*?src=\"(.*?)\".*?/>") replace:_body_html withDetailsBlock:^NSString *(RxMatch *match) {
+        _body_html = [RX(@"<br /><br /><img src=\"[^\"]*images/attachicons.*?aid=(\\d+).*?src=\"(.*?)\".*?/>") replace:_body_html withDetailsBlock:^NSString *(RxMatch *match) {
             
             RxMatchGroup *m1 = [match.groups objectAtIndex:1];
             RxMatchGroup *m2 = [match.groups objectAtIndex:2];
             
             NSString *aid = m1.value;
-            NSString *src = [NSString stringWithFormat:@"http://%@/forum/%@", HPBaseURL, m2.value];
+            NSString *src = m2.value;
             
             if ([imgsArray indexOfObject:src] == NSNotFound) {
                 // 正则提取是倒序
@@ -551,6 +552,11 @@
     }
     if (debugContent) NSLog(@"floor %ld", self.floor);
     
+    // signature
+    //
+    NSString *signature = [html stringBetweenString:@"<div class=\"signatures\" style=\"max-height:14px;maxHeightIE:14px;\">" andString:@"</div>"];
+    self.signature = signature ?: @"";
+    
     // content
     //
     Rx *rx = [Rx rx:@"<td class=\"t_msgfont\" id=\"postmessage_\\d+\">(.*?)</td></tr></table>" options:NSRegularExpressionDotMatchesLineSeparators];
@@ -612,12 +618,12 @@
         // 最后会是 <img class="attach_image" src="http://domain.com/xxx.jpg" aid="123456" size="123" />
         
         // 帖子内部 image
-        _body_html = [RX(@"<img src=\"images/common/none\\.gif\" file=\"(.*?)\".*?aimg_(\\d+).*?/>") replace:_body_html withDetailsBlock:^NSString *(RxMatch *match) {
+        _body_html = [RX(@"<img src=\"[^\"]+images/common/none\\.gif\" file=\"(.*?)\".*?aimg_(\\d+).*?/>") replace:_body_html withDetailsBlock:^NSString *(RxMatch *match) {
             
             RxMatchGroup *m1 = [match.groups objectAtIndex:1];
             RxMatchGroup *m2 = [match.groups objectAtIndex:2];
             //NSLog(@"%@", m1.value);
-            NSString *src = [NSString stringWithFormat:@"http://%@/forum/%@", HPBaseURL, m1.value];
+            NSString *src = m1.value;
             // 正则提取是倒序
             [imgsArray insertObject:src atIndex:0];
             NSString *aid = m2.value;
@@ -641,7 +647,7 @@
 
                 //NSLog(@"src %@, aid %@", g1.value, g2.value);
                 
-                NSString *src = [NSString stringWithFormat:@"http://%@/forum/%@", HPBaseURL, m1.value];
+                NSString *src = m1.value;
                 NSString *aid = m2.value;
                 
                 if ([imgsArray indexOfObject:src] == NSNotFound) {
@@ -850,48 +856,62 @@
     
     NSString *final = (NSString *)string;
     
-    AFNetworkReachabilityStatus status = [NSStandardUserDefaults integerForKey:kHPNetworkStatus];
-    HPImageDisplayStyle style = HPImageDisplayStyleFull;
+    AFNetworkReachabilityStatus status = [[HPHttpClient sharedClient] networkReachabilityStatus];
     
-    if (status == AFNetworkReachabilityStatusReachableViaWWAN) {
-        style = [Setting integerForKey:HPSettingImageWWAN];
-    } else if (status == AFNetworkReachabilityStatusReachableViaWiFi) {
-        style = [Setting integerForKey:HPSettingImageWifi];
-    } else {
-        NSLog(@"other status %d", status);
-    }
-    //NSLog(@"style %d", style);
+    BOOL imageAutoLoadEnable = NO;
+    BOOL imageSizeFilterEnable = NO;
+    NSInteger imageSizeFilterMinValue = 0;
+    BOOL imageCDNEnable = NO;
+    NSInteger imageCDNMinValue = 0;
     
-    BOOL imageSizeFilterEnable = [Setting boolForKey:HPSettingImageSizeFilterEnable];
-    NSInteger imageSizeFilterMinValue = [Setting integerForKey:HPSettingImageSizeFilterMinValue];
-    
-    BOOL imageCDNEnable = [Setting boolForKey:HPSettingImageCDNEnable];
-    imageCDNEnable = [UMOnlineConfig getBoolConfigWithKey:@"imageCDNEnable" defaultYES:imageCDNEnable];
-    NSInteger imageCDNMinValue = [Setting integerForKey:HPSettingImageCDNMinValue];
-    imageCDNMinValue = MAX(imageCDNMinValue, [UMOnlineConfig getIntegerConfigWithKey:@"imageCDNMinValue" defaultValue:imageCDNMinValue]);
-    
-    if (style != HPImageDisplayStyleFull || imageSizeFilterEnable) {
+    if (status == AFNetworkReachabilityStatusReachableViaWiFi) {
+        imageAutoLoadEnable = [Setting boolForKey:HPSettingImageAutoLoadEnableWifi];
         
-        __block int i = 0;
+        imageSizeFilterEnable = [Setting boolForKey:HPSettingImageSizeFilterEnableWifi];
+        imageSizeFilterMinValue = [Setting integerForKey:HPSettingImageSizeFilterMinValueWifi];
+        
+        imageCDNEnable = [Setting boolForKey:HPSettingImageCDNEnableWifi];
+        imageCDNEnable = [UMOnlineConfig getBoolConfigWithKey:HPOnlineImageCDNEnableWifi defaultYES:imageCDNEnable];
+        imageCDNMinValue = [Setting integerForKey:HPSettingImageCDNMinValueWifi];
+        imageCDNMinValue = MAX(imageCDNMinValue, [UMOnlineConfig getIntegerConfigWithKey:HPOnlineImageCDNMinValueWifi defaultValue:imageCDNMinValue]);
+    } else {
+        imageAutoLoadEnable = [Setting boolForKey:HPSettingImageAutoLoadEnableWWAN];
+        
+        imageSizeFilterEnable = [Setting boolForKey:HPSettingImageSizeFilterEnableWWAN];
+        imageSizeFilterMinValue = [Setting integerForKey:HPSettingImageSizeFilterMinValueWWAN];
+        
+        imageCDNEnable = [Setting boolForKey:HPSettingImageCDNEnableWWAN];
+        imageCDNEnable = [UMOnlineConfig getBoolConfigWithKey:HPOnlineImageCDNEnableWWAN defaultYES:imageCDNEnable];
+        imageCDNMinValue = [Setting integerForKey:HPSettingImageCDNMinValueWWAN];
+        imageCDNMinValue = MAX(imageCDNMinValue, [UMOnlineConfig getIntegerConfigWithKey:HPOnlineImageCDNMinValueWWAN defaultValue:imageCDNMinValue]);
+    }
+    
+    if (!imageAutoLoadEnable || imageSizeFilterEnable) {
+        
         NSRegularExpression *rx = RX(@"<img class=\"attach_image\" src=\"(.*?)\"(.*?)/>");
-        NSArray *matches = [rx matches:string];
 
         final = [rx replace:string withDetailsBlock:^NSString *(RxMatch *match) {
             
-            i++;
+            // 缓存里有就不过滤
+            NSString *src = [(RxMatchGroup *)match.groups[1] value];
+            NSString *key = [[SDWebImageManager sharedManager] cacheKeyForURL:[NSURL URLWithString:src]];
+            if ([[SDImageCache sharedImageCache] hp_imageExistsWithKey:key]) {
+                return match.value;
+            }
             
             NSString *sizeString = [match.value stringBetweenString:@"size=\"" andString:@"\""];
             double imageSize = sizeString.length ? [sizeString doubleValue] : 0.f;
             
             BOOL filter = imageSizeFilterEnable && imageSize >= imageSizeFilterMinValue;
-            filter = filter || style == HPImageDisplayStyleNone;
-            filter = filter || (style == HPImageDisplayStyleOne && i != matches.count/*正则是倒序*/);
-            BOOL useCDN = filter && imageCDNEnable && imageSize >= imageCDNMinValue;
+            filter = filter || !imageAutoLoadEnable;
+            
+            BOOL useCDN = filter && imageCDNEnable && imageSize >= imageCDNMinValue && ![src hasSuffix:@".gif"];
             
             if (filter) {
                 NSString *imageNode = match.value;
                 if (useCDN) {
-                    // <img class=\"attach_image\" src=\"attachments/day_160327/1603272216a6c3122910ffe02f.jpeg\" aid=\"2465634\" size=\"719.06\" />
+                    // <img class=\"attach_image\" src=\"http://img.hi-pda.com/forum/attachments/day_160327/1603272216a6c3122910ffe02f.jpeg\" aid=\"2465634\" size=\"719.06\" />
+                    imageNode = [imageNode stringByReplacingOccurrencesOfString:@"http://img.hi-pda.com/forum/" withString:@""];
                     imageNode = [RX(@"src=\"([^\"]+)\"") replace:imageNode withDetailsBlock:^NSString *(RxMatch *match) {
                         // 只有路径的图片是hi-pda图片
                         if ([match.value indexOf:@"http"] != -1) {
@@ -900,8 +920,12 @@
                         if (match.groups.count != 2) {
                             return match.value;
                         }
+                        
                         NSString *src = [(RxMatchGroup *)match.groups[1] value];
-                        return [NSString stringWithFormat:@"src=\"http://7xq2vp.com1.z0.glb.clouddn.com/forum/%@-w600\"", src];
+                        src = [NSString stringWithFormat:@"http://%@/forum/%@", HP_IMG_BASE_URL, src];
+                        src = [src hp_thumbnailURL];
+                        
+                        return [NSString stringWithFormat:@"src=\"%@\"", src];
                     }];
                 }
                 NSString *sizeDisplayString = [sizeString imageSizeString];

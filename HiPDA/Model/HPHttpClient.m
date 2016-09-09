@@ -83,6 +83,9 @@
     [d addEntriesFromDictionary:[s onlineParamaters]];
     parameters = [d copy];
     
+    NSStringEncoding gbkEncoding = CFStringConvertEncodingToNSStringEncoding(kCFStringEncodingGB_18030_2000);
+    path = [path stringByAddingPercentEscapesUsingEncoding:gbkEncoding];
+    
     [super getPath:path
         parameters:parameters
            success:^(AFHTTPRequestOperation *operation, id responseObject){
@@ -180,6 +183,11 @@
     }
     
     [request setHTTPShouldHandleCookies:YES];
+    
+    // 使用XHR绕过广告
+    if ([Setting boolForKey:HPSettingEnableXHR]) {
+        [request setValue:@"XMLHttpRequest" forHTTPHeaderField:@"X-Requested-With"];
+    }
     
     return request;
 }

@@ -10,6 +10,8 @@
 #import "HPHttpClient.h"
 #import "NSString+HTML.h"
 #import "HPSetting.h"
+#import "HPSearch.h"
+#import "HPNewPost.h"
 
 @implementation HPUser {
 @private
@@ -30,7 +32,7 @@
     NSString *avatar = [attributes valueForKeyPath:@"avatar"];
     if (avatar) {
         if (![avatar isEqualToString:@"000/00/00/00"]) {
-            _avatarImageURLString = [NSString stringWithFormat:@"http://%@/forum/uc_server/data/avatar/%@_avatar_small.jpg", HPBaseURL, avatar];
+            _avatarImageURLString = [NSString stringWithFormat:@"http://%@/forum/uc_server/data/avatar/%@_avatar_small.jpg", HP_IMG_BASE_URL, avatar];
             _avatarImageURL = [NSURL URLWithString:_avatarImageURLString];
             //NSLog(@"avatar url %@", _avatarImageURL);
         } else {
@@ -54,7 +56,7 @@
         //NSLog(@"%02d/%02d/%02d", a, b, c);
         
         //size [small middle big]
-        _avatarImageURLString = [NSString stringWithFormat:@"http://%@/forum/uc_server/data/avatar/000/%02ld/%02ld/%02ld_avatar_small.jpg", HPBaseURL, a, b, c];
+        _avatarImageURLString = [NSString stringWithFormat:@"http://%@/forum/uc_server/data/avatar/000/%02ld/%02ld/%02ld_avatar_small.jpg", HP_IMG_BASE_URL, a, b, c];
         _avatarImageURL = [NSURL URLWithString:_avatarImageURLString];
     }
     
@@ -92,7 +94,7 @@
     c = _uid % 100;
     //NSLog(@"%02d/%02d/%02d", a, b, c);
     
-    NSString *avatarImageURLString = [NSString stringWithFormat:@"http://%@/forum/uc_server/data/avatar/000/%02ld/%02ld/%02ld_avatar_small.jpg", HPBaseURL, a, b, c];
+    NSString *avatarImageURLString = [NSString stringWithFormat:@"http://%@/forum/uc_server/data/avatar/000/%02ld/%02ld/%02ld_avatar_small.jpg", HP_IMG_BASE_URL, a, b, c];
     return [NSURL URLWithString:avatarImageURLString];
 }
 
@@ -188,12 +190,50 @@
     
 }
 
-
-- (NSString *)usernameForUrl {
-    NSStringEncoding gbkEncoding = CFStringConvertEncodingToNSStringEncoding(kCFStringEncodingGB_18030_2000);
-    NSString* escapedURLString = [self.username
-                                  stringByAddingPercentEscapesUsingEncoding:gbkEncoding];
-    return escapedURLString;
++ (void)getUserUidWithUserName:(NSString *)username
+                         block:(void (^)(NSString *uid, NSError *error))block
+{
+    [self.class getUserSpaceDetailsWithUid:0 orUsername:username block:^(NSDictionary *dict, NSError *error) {
+        if (error) {
+            block(nil, error);
+            return;
+        }
+        if ([dict objectForKey:@"uid"]) {
+            block([dict objectForKey:@"uid"], nil);
+        } else {
+            block(nil, [NSError errorWithDomain:@".hi-pda.com" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"没找到uid"}]);
+        }
+    }];
 }
-
++ (void)getUserSignatureWithUid:(NSString *)uid
+                          block:(void (^)(NSString *signature, NSError *error))block
+{
+    [HPSearch searchWithParameters:@{@"key": uid}
+                              type:HPSearchTypeUserTopic
+                              page:1
+                             block:^(NSArray *results, NSInteger pageCount, NSError *error) {
+                                 
+                                 if (error) {
+                                     block(nil, error);
+                                     return;
+                                 }
+                                 if (!results.count) {
+                                     block(nil, [NSError errorWithDomain:@".hi-pda.com" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"没找到帖子"}]);
+                                     return;
+                                 }
+                                 
+                                 NSString *tid = [results[0] objectForKey:@"tidString"];
+                                 [HPNewPost loadThreadWithTid:[tid integerValue] page:1 forceRefresh:YES printable:NO authorid:0 redirectFromPid:0 block:^(NSArray *posts, NSDictionary *parameters, NSError *error) {
+                                     if (error) {
+                                         block(nil, error);
+                                     }
+                                     if (!posts.count) {
+                                         block(nil, [NSError errorWithDomain:@".hi-pda.com" code:-1 userInfo:@{NSLocalizedDescriptionKey:@"没找到帖子"}]);
+                                         return;
+                                     }
+                                     HPNewPost *p = posts[0];
+                                     block(p.signature, nil);
+                                 }];
+                             }];
+}
 @end

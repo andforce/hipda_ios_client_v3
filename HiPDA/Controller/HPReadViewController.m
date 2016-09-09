@@ -15,6 +15,7 @@
 #import "HPEditPostViewController.h"
 #import "HPSFSafariViewController.h"
 #import "HPViewHTMLController.h"
+#import "HPViewSignatureViewController.h"
 
 #import "HPNewPost.h"
 #import "HPDatabase.h"
@@ -37,6 +38,8 @@
 #import "DZWebBrowser.h"
 #import "NSString+Additions.h"
 #import "NSString+HTML.h"
+#import "NSString+CDN.h"
+#import "UIWebView+HPSafeLoadString.h"
 
 #import "UIViewController+KNSemiModal.h"
 #import "UIAlertView+Blocks.h"
@@ -51,6 +54,7 @@
 #import <UIImageView+WebCache.h>
 
 #import "HPActivity.h"
+#import "HPBlockService.h"
 
 
 #define UIColorFromRGB(rgbValue) [UIColor colorWithRed:((float)((rgbValue & 0xFF0000) >> 16))/255.0 green:((float)((rgbValue & 0xFF00) >> 8))/255.0 blue:((float)(rgbValue & 0xFF))/255.0 alpha:1.0]
@@ -85,6 +89,9 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
 
 
 @interface HPReadViewController () <UIWebViewDelegate, IBActionSheetDelegate, IDMPhotoBrowserDelegate, UIScrollViewDelegate, HPCompositionDoneDelegate, HPStupidBarDelegate>
+
+@property (nonatomic, strong) UIWebView *webView;
+
 @property (nonatomic, strong) NSArray *posts;
 @property (nonatomic, strong) NSString *htmlString;
 
@@ -265,11 +272,7 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
     [wv.scrollView addObserver:self forKeyPath:@"contentOffset" options:NSKeyValueObservingOptionNew context:(__bridge void *)(self)];
     
     [self setView:wv];
-}
-
-
-- (UIWebView *)webView {
-    return (UIWebView *)[self view];
+    self.webView = wv;
 }
 
 - (void)didReceiveMemoryWarning
@@ -283,8 +286,8 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
 {
     // deal with web view special needs
     NSLog(@"UIWebViewVC dealloc");
-    [(UIWebView*)self.view stopLoading];
-    [(UIWebView*)self.view setDelegate:nil];
+    [self.webView stopLoading];
+    [self.webView setDelegate:nil];
    
     [self.webView.scrollView removeObserver:self forKeyPath:@"contentOffset" context:(__bridge void *)self];
     
@@ -412,21 +415,15 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
     _reloadingHeader = YES;
     _reloadingFooter = YES;
     
-    /*
-    NSURL *laoFontURL = [[NSBundle mainBundle] URLForResource:@"FZLanTingHei-R-GBK" withExtension:@"TTF"];
-    NSArray *fontPostScriptNames = [UIFont registerFontFromURL:laoFontURL];
-    NSLog(@"%@", fontPostScriptNames);
-    */
-     
     // clear
     [self.webView stringByEvaluatingJavaScriptFromString:@"document.open();document.close();"];
     
-    NSMutableString *string = nil;
-    if (![Setting boolForKey:HPSettingNightMode]) {
-        string = [[NSString stringWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"post_view" ofType:@"html"] encoding:NSUTF8StringEncoding error:nil] mutableCopy];
-    } else {
-        string = [[NSString stringWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"post_view_dark" ofType:@"html"] encoding:NSUTF8StringEncoding error:nil] mutableCopy];
-    }
+#if DEBUG && 0 /*直接下拉刷新即可刷新模板 cd /HiPDA/View/; python -m SimpleHTTPServer*/
+    NSData *___d = [NSData dataWithContentsOfURL:[NSURL URLWithString:@"http://localhost:8000/post_view.html"]];
+    NSMutableString *string = [[[NSString alloc] initWithData:___d encoding:NSUTF8StringEncoding] mutableCopy];
+#else
+    NSMutableString *string = [[NSString stringWithContentsOfFile:[[NSBundle mainBundle] pathForResource:@"post_view" ofType:@"html"] encoding:NSUTF8StringEncoding error:nil] mutableCopy];
+#endif
     
     if (IS_IPAD) {
         // ipad 上禁用 FastClick,
@@ -437,22 +434,26 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
     if (_thread.title && !refresh)
         [string replaceOccurrencesOfString:@"##title##" withString:_thread.title options:0 range:NSMakeRange(0, string.length)];
     
-    NSString *targetFontSize = [NSString stringWithFormat:@"%i.000001%%",_currentFontSize];
-    [string replaceOccurrencesOfString:@"**[txtadjust]**" withString:targetFontSize options:0 range:NSMakeRange(0, string.length)];
+    NSDictionary *replace = @{
+        @"**[txtadjust]**": S(@"%@.000001%%",@(self.currentFontSize)),
+        @"**[lineHeight]**": S(@"%@%%", @(self.currentLineHeight)),
+        @"**[screen_width]**": @(HP_SCREEN_WIDTH).stringValue,
+        @"**[screen_height]**": @(HP_SCREEN_HEIGHT).stringValue,
+        @"**[min-height]**" : @((int)(HP_SCREEN_WIDTH * 0.618)).stringValue,
+        @"**[style]**": [Setting boolForKey:HPSettingNightMode] ? @"dark": @"light",
+#if DEBUG && 0
+        @"**[debug_script]**": @"<script src=\"http://wechatfe.github.io/vconsole/lib/vconsole.min.js?v=1.3.0\"></script>",
+#else
+        @"**[debug_script]**": @"",
+#endif
+    };
+    [replace enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSString *value, BOOL *stop) {
+        [string replaceOccurrencesOfString:key withString:value options:0 range:NSMakeRange(0, string.length)];
+    }];
     
-    [string replaceOccurrencesOfString:@"**[lineHeight]**" withString:S(@"%i%%", _currentLineHeight) options:0 range:NSMakeRange(0, string.length)];
-    
-    // allowLossyConversion : YES OR NO
-    // https://crashlytics.com/solo2/ios/apps/wujichao.hipda/issues/5487f43e65f8dfea154bb6ff
-    // [__NSCFString dataUsingEncoding:allowLossyConversion:]: didn't convert all characters
-    // webview使用loadHTMLString:baseURL:也是用了dataUsingEncoding:allowLossyConversion方法
-    // 但是有时会crash(didn't convert all characters)
-    // 它的allowLossyConversion是NO
     
     self.htmlString = string;
-    NSData *htmlData = [string dataUsingEncoding:NSUTF8StringEncoding allowLossyConversion:YES];
-    [self.webView loadData:htmlData MIMEType:@"text/html" textEncodingName:@"UTF-8" baseURL:[NSURL URLWithString:S(@"http://%@/forum/", HPBaseURL)]];
-    //[self.webView loadHTMLString:string baseURL:[NSURL URLWithString:@"http://www.hi-pda.com/forum/"]];
+    [self.webView hp_safeLoadHTMLString:string baseURL:[NSURL URLWithString:S(@"http://%@/forum/", HPBaseURL)]];
     
     BOOL printable = !_forceFullPage && (_current_page == 1 && _current_author_uid == 0);
     
@@ -477,6 +478,8 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
             [weakSelf refreshThreadInfo:parameters
                            find_pid:weakSelf.find_pid];
             
+            [[HPCache sharedCache] readThread:weakSelf.thread];
+            
             // update title
             [string replaceOccurrencesOfString:@"##title##" withString:weakSelf.thread.title options:0 range:NSMakeRange(0, string.length)];
             
@@ -489,17 +492,17 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
                 NSString *liClass = (post.floor == weakSelf.gotoFloor) ? @"gotoFloor" : @"";
                 
                 NSString *list = nil;
-                BOOL isBlocked = [Setting isBlocked:post.user.username];
+                BOOL isBlocked = [[HPBlockService shared] isUserInBlockList:post.user.username];
                 NSString *avatarURLSrc = post.user.avatarImageURL ?
                     [NSString stringWithFormat:@"src=\"%@\"", [post.user.avatarImageURL absoluteString]]
                     : @"";
                 
                 if ([Setting boolForKey:HPSettingShowAvatar]) {
-                    list = [NSString stringWithFormat:@"<li class=\"%@\" data-id=\"floor://%ld\" ><a name=\"floor_%ld\"></a><div class=\"info\"><span class=\"avatar\"><img data-id='user://%@' %@ onerror=\"this.onerror=null;this.src='http://%@/forum/uc_server/images/noavatar_middle.gif'\" ></span><span class=\"author\" data-id='user://%@'>%@</span><span class=\"floor\">%ld#</span><span class=\"time-ago\">%@</span></div><div class=\"content%@\">%@</div></li>", liClass, post.floor, post.floor,  [post.user usernameForUrl], avatarURLSrc, HPBaseURL, [post.user usernameForUrl], post.user.username, post.floor, [HPNewPost dateString:post.date], isBlocked?@" blocked":@"", isBlocked?@"- <i>blocked</i> - ":post.body_html];
+                    list = [NSString stringWithFormat:@"<li class=\"%@\" data-id=\"floor://%ld\" ><a name=\"floor_%ld\"></a><div class=\"info\"><span class=\"avatar\"><img data-id='user://%@' %@ onerror=\"this.onerror=null;this.src='http://%@/forum/uc_server/images/noavatar_middle.gif'\" ></span><span class=\"author\" data-id='user://%@'>%@</span><span class=\"floor\">%ld#</span><span class=\"time-ago\">%@</span></div><div class=\"content%@\">%@</div></li>", liClass, post.floor, post.floor,  [post.user.username URLEncode], avatarURLSrc, HPBaseURL, [post.user.username URLEncode], post.user.username, post.floor, [HPNewPost dateString:post.date], isBlocked?@" blocked":@"", isBlocked?@"- <i>blocked</i> - ":post.body_html];
                     
                 } else {
                     
-                    list = [NSString stringWithFormat:@"<li class=\"%@\" data-id=\"floor://%ld\" ><a name=\"floor_%ld\"></a><div class=\"info\"><span class=\"author\" data-id='user://%@' style=\"left: 0;\">%@</span><span class=\"floor\">%ld#</span><span class=\"time-ago\">%@</span></div><div class=\"content%@\">%@</div></li>", liClass, post.floor, post.floor, [post.user usernameForUrl], post.user.username, post.floor, [HPNewPost dateString:post.date], isBlocked?@" blocked":@"", isBlocked?@"- <i>blocked</i> - ":post.body_html];
+                    list = [NSString stringWithFormat:@"<li class=\"%@\" data-id=\"floor://%ld\" ><a name=\"floor_%ld\"></a><div class=\"info\"><span class=\"author\" data-id='user://%@' style=\"left: 0;\">%@</span><span class=\"floor\">%ld#</span><span class=\"time-ago\">%@</span></div><div class=\"content%@\">%@</div></li>", liClass, post.floor, post.floor, [post.user.username URLEncode], post.user.username, post.floor, [HPNewPost dateString:post.date], isBlocked?@" blocked":@"", isBlocked?@"- <i>blocked</i> - ":post.body_html];
                 }
                 
                 // 解决由于一些tag未闭合造成的影响
@@ -515,7 +518,7 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
             NSString *final = [HPNewPost preProcessHTML:string];
             
             //NSLog(@"%@", final);
-            [weakSelf.webView loadHTMLString:final baseURL:[NSURL URLWithString:S(@"http://%@/forum/", HPBaseURL)]];
+            [weakSelf.webView hp_safeLoadHTMLString:final baseURL:[NSURL URLWithString:S(@"http://%@/forum/", HPBaseURL)]];
             
             [weakSelf endLoad:YES];
             
@@ -680,7 +683,7 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
 - (BOOL)webView:(UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(UIWebViewNavigationType)navigationType {
     
     NSString *urlString = [[request URL] absoluteString];
-    NSLog(@"%@ %ld %@",urlString, navigationType, request.URL.scheme);
+    NSLog(@"url %@, type %ld, scheme %@",urlString, navigationType, request.URL.scheme);
     
     
     if ([request.URL.scheme isEqualToString:@"floor"]) {
@@ -694,6 +697,7 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
     } else if ([request.URL.scheme isEqualToString:@"image"]) {
         
         NSString *src = [request.URL.absoluteString stringByReplacingOccurrencesOfString:@"image://http//" withString:@"http://"];
+        src = [src stringByReplacingOccurrencesOfString:@"image://https//" withString:@"https://"];
         [self openImage:src];
         NSLog(@"here");
         return NO;
@@ -701,7 +705,7 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
     } else if ([request.URL.scheme isEqualToString:@"user"]) {
         
         HPUserViewController *uvc = [HPUserViewController new];
-        uvc.username = [urlString stringByReplacingOccurrencesOfString:@"user://" withString:@""];
+        uvc.username = [[urlString stringByReplacingOccurrencesOfString:@"user://" withString:@""] URLDecode];
         
         [self.navigationController pushViewController:uvc animated:YES];
         return NO;
@@ -905,6 +909,7 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
                                   otherButtonTitles:
                                   @"回复",
                                   @"引用",
+                                  @"查看签名",
                                   @"发送短消息",
                                   _current_author_uid != 0 ? @"查看全部" : @"只看该作者", nil];
     self.currentActionSheet = actionSheet;
@@ -1007,13 +1012,17 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
                 case 2://引用
                 {
                     [self quoteSomeone:nil];
-
                     break;
                 }
-                case 3://发送短消息
+                case 3://查看签名
+                {
+                    [self viewSignature:_current_action_post];
+                    break;
+                }
+                case 4://发送短消息
                     [self promptForSendMessage:_current_action_post];
                     break;
-                case 4://只看该作者
+                case 5://只看该作者
                     [self toggleOnlySomeone:_current_action_post.user];
                     break;
                 default:
@@ -1095,6 +1104,12 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
     src = [src stringByReplacingOccurrencesOfString:@"???s" withString:@", "];
     RxMatch *m = [RX(@"___(.*?)___") firstMatchWithDetails:src];
     src = [src replace:RX(@"___(.*?)___") with:@""];
+    
+    // cdn -> 原图url
+    // 现在的交互形式是 用户点击小图(CDN压缩图片), 然后加载大图, 加载好大图来替换小图
+    if ([src indexOf:HP_CDN_BASE_URL] != -1) {
+        src = [src hp_originalURL];
+    }
 
     if (m.groups.count == 2) {
         CGRect r = CGRectFromString([(RxMatchGroup *)(m.groups[1]) value]);
@@ -1201,6 +1216,40 @@ typedef NS_ENUM(NSInteger, StoryTransitionType)
     [self presentViewController:[HPCommon swipeableNVCWithRootVC:sendvc] animated:YES completion:nil];
     
     [Flurry logEvent:@"Read Reply"];
+}
+
+- (void)viewSignature:(HPNewPost *)post
+{
+    void (^showSignature)(NSString *signature) = ^(NSString *signature){
+        if (signature.length) {
+            [SVProgressHUD dismiss];
+            HPViewSignatureViewController *vc = [[HPViewSignatureViewController alloc] initWithSignature:signature];
+            [self.navigationController pushViewController:vc animated:YES];
+        } else {
+            [SVProgressHUD showErrorWithStatus:@"没有签名"];
+        }
+    };
+    
+    NSString *signature = post.signature;
+    if (signature == nil) {
+        [SVProgressHUD show];
+        [HPUser getUserUidWithUserName:post.user.username block:^(NSString *uid, NSError *error) {
+            if (error) {
+                [SVProgressHUD showErrorWithStatus:error.localizedDescription];
+                return;
+            }
+            [HPUser getUserSignatureWithUid:uid block:^(NSString *signature, NSError *error) {
+                if (error) {
+                    [SVProgressHUD showErrorWithStatus:error.localizedDescription];
+                    return;
+                }
+                NSLog(@"%@", signature);
+                showSignature(signature);
+            }];
+        }];
+    } else {
+        showSignature(signature);
+    }
 }
 
 - (void)replySomeone:(id)sender {

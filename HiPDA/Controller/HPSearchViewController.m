@@ -20,6 +20,7 @@
 #import <ReactiveCocoa.h>
 
 #import "SWRevealViewController.h"
+#import "UITableView+ScrollToTop.h"
 
 #define CELL_CONTENT_WIDTH 320.0f
 #define CELL_CONTENT_MARGIN 10.0f
@@ -27,20 +28,17 @@
 @interface HPSearchViewController ()
 
 @property (nonatomic, strong) NSArray *results;
-@property (nonatomic, strong) UISearchBar *searchBar;
-
 @property (nonatomic, strong) HPUser *user;
+@property (nonatomic, assign) NSInteger current_page;
+@property (nonatomic, assign) NSInteger page_count;
+
+@property (nonatomic, strong) UISearchBar *searchBar;
+@property (nonatomic, strong) UIBarButtonItem *searchButtonItem;
+@property (nonatomic, strong) UIBarButtonItem *nextPageButtonItem;
 
 @end
 
-@implementation HPSearchViewController {
-@private
-    NSInteger _current_page;
-    NSInteger _page_count;
-    
-    UIBarButtonItem *_searchButtonItem;
-    UIBarButtonItem *_nextPageButtonItem;
-}
+@implementation HPSearchViewController
 
 - (instancetype)initWithUser:(HPUser *)user {
     self = [super init];
@@ -51,6 +49,10 @@
     _user = user;
     
     return self;
+}
+- (void)dealloc
+{
+    
 }
 
 - (void)viewDidLoad
@@ -120,15 +122,12 @@
      subscribeNext:^(NSArray *results) {
          @strongify(self);
          
-         _results = results;
-         _page_count = 1;
+         self.results = results;
+         self.page_count = 1;
          
          [self.tableView reloadData];
-         if (_results.count > 0) {
-             NSIndexPath *indexPath = [NSIndexPath indexPathForRow:0 inSection:0];
-             [self.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionNone animated:NO];
-             [self.tableView flashScrollIndicators];
-         }
+         [self.tableView hp_scrollToTop];
+         [self.tableView flashScrollIndicators];
      }];
 }
 
@@ -233,9 +232,7 @@
                                      _page_count = pageCount;
                                      
                                      [weakSelf.tableView reloadData];
-                                     
-                                     NSIndexPath *indexPath = [NSIndexPath indexPathForRow:0 inSection:0];
-                                     [weakSelf.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionNone animated:NO];
+                                     [weakSelf.tableView hp_scrollToTop];
                                      [weakSelf.tableView flashScrollIndicators];
                                      
                                      // update ui
@@ -279,9 +276,7 @@
                                      _page_count = pageCount;
                                      
                                      [weakSelf.tableView reloadData];
-                                     
-                                     NSIndexPath *indexPath = [NSIndexPath indexPathForRow:0 inSection:0];
-                                     [weakSelf.tableView scrollToRowAtIndexPath:indexPath atScrollPosition:UITableViewScrollPositionNone animated:NO];
+                                     [weakSelf.tableView hp_scrollToTop];
                                      [weakSelf.tableView flashScrollIndicators];
                                      
                                      // update ui
@@ -504,21 +499,19 @@
         [op addExecutionBlock:^{
             
             NSMutableArray *results = [NSMutableArray array];
-            [[HPDatabase sharedDb] open];
-            
-            FMResultSet *resultSet = [[[HPDatabase sharedDb] db] executeQuery:@"SELECT * FROM user WHERE username LIKE ?", [NSString stringWithFormat:@"%%%@%%", key]];
-            while ([resultSet next]) {
-                
-                NSString *username = [resultSet stringForColumnIndex:0];
-                NSString *uid = [resultSet stringForColumnIndex:1];
-                
-                HPUser *user = [HPUser new];
-                user.username = username;
-                user.uid = [uid integerValue];
-                [results addObject:@{@"user": user}];
-            }
-            
-            [[HPDatabase sharedDb] close];
+            [[HPDatabase sharedDb].queue inDatabase:^(FMDatabase *db) {
+                FMResultSet *resultSet = [db executeQuery:@"SELECT * FROM user WHERE username LIKE ?", [NSString stringWithFormat:@"%%%@%%", key]];
+                while ([resultSet next]) {
+                    
+                    NSString *username = [resultSet stringForColumnIndex:0];
+                    NSString *uid = [resultSet stringForColumnIndex:1];
+                    
+                    HPUser *user = [HPUser new];
+                    user.username = username;
+                    user.uid = [uid integerValue];
+                    [results addObject:@{@"user": user}];
+                }
+            }];
             
             [subscriber sendNext:[results copy]];
             [subscriber sendCompleted];

@@ -96,7 +96,6 @@
                                HPSettingFavForums:@[@2, @6, @59],
                                HPSettingFavForumsTitle:@[@"Discovery", @"Buy & Sell", @"E-INK"],
                                HPSettingShowAvatar:@YES,
-                               HPSettingOrderByDate:@NO,
                                HPSettingNightMode:@NO,
                                HPSettingFontSize:@16.f,
                                HPSettingFontSizeAdjust:IS_IPAD?@130:@100,
@@ -109,7 +108,6 @@
                                HPNoticeCount:@0,
                                HPSettingBGLastMinite:@20.f,
                                HPSettingBgFetchNotice:@YES,
-                               HPSettingBgFetchThread:@NO,
                                HPSettingIsPullReply:@NO,
                                HPSettingStupidBarDisable:@NO,
                                HPSettingStupidBarHide:@YES,
@@ -123,13 +121,22 @@
                                HPSettingBugTrackEnable:@YES,
                                HPSettingBSForumOrderByDate:@NO,
                                HPSettingForceLogin:@NO,
+                               HPSettingEnableXHR:@NO,
                                HPSettingSwipeBack:@YES,
                                HPBgFetchInterval:@(60),
                                HP_SHOW_MESSAGE_IMAGE_NOTICE:@(NO),
-                               HPSettingImageSizeFilterEnable:@YES,
-                               HPSettingImageSizeFilterMinValue:@1024,
-                               HPSettingImageCDNEnable:@NO,
-                               HPSettingImageCDNMinValue:@1024,
+                               
+                               HPSettingImageAutoLoadEnableWWAN:@YES,
+                               HPSettingImageSizeFilterEnableWWAN:@YES,
+                               HPSettingImageSizeFilterMinValueWWAN:@1024,
+                               HPSettingImageCDNEnableWWAN:@NO,
+                               HPSettingImageCDNMinValueWWAN:@1024,
+                               
+                               HPSettingImageAutoLoadEnableWifi:@YES,
+                               HPSettingImageSizeFilterEnableWifi:@NO,
+                               HPSettingImageSizeFilterMinValueWifi:@1024,
+                               HPSettingImageCDNEnableWifi:@NO,
+                               HPSettingImageCDNMinValueWifi:@1024,
                                };
     return defaults;
 }
@@ -219,51 +226,5 @@
     }
     return nil;
 }
-
-#pragma mark - block list 
-- (BOOL)isBlocked:(NSString *)username {
-    
-    NSArray *list = [self objectForKey:HPSettingBlockList];
-    // maybe list should be a dic for speed, i have no idea.
-    // like list_table = @{@"xiaoming":@YES, @"xiaowang":@YES};
-    __block BOOL isBlocked = NO;
-    [list enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
-        if ([username isEqualToString:obj]) {
-            isBlocked = YES;
-            *stop = YES;
-        }
-    }];
-    return isBlocked;
-}
-
-- (void)addBlockWithUsername:(NSString *)username {
-    NSMutableArray *list = [NSMutableArray arrayWithArray:[self objectForKey:HPSettingBlockList]];
-    [list addObject:username];
-    [Setting saveObject:[NSArray arrayWithArray:list] forKey:HPSettingBlockList];
-    NSLog(@"add %@\nthen %@", username, [self objectForKey:HPSettingBlockList]);
-    
-    [Flurry logEvent:@"Account UpdateBlocks" withParameters:@{@"list":list}];
-}
-- (void)removeBlockWithUsername:(NSString *)username {
-    NSMutableArray *list = [NSMutableArray arrayWithArray:[self objectForKey:HPSettingBlockList]];
-    [list removeObject:username];
-    [Setting saveObject:[NSArray arrayWithArray:list] forKey:HPSettingBlockList];
-    NSLog(@"remove %@\nthen %@", username, [self objectForKey:HPSettingBlockList]);
-}
-
-
-
-#pragma mark - 
-/*
-- (NSArray *)defaultForums {
-    
-    HPForum *f1 = [[HPForum alloc] initWithAttributes:@{@"title":@"Discovery", @"fid":@2}];
-    HPForum *f2 = [[HPForum alloc] initWithAttributes:@{@"title":@"Buy & Sell", @"fid":@6}];
-    HPForum *f3 = [[HPForum alloc] initWithAttributes:@{@"title":@"PalmOS", @"fid":@14}];
-    
-    return @[f1,f2,f3];
-}
-*/
-
 
 @end
